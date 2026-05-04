@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# macOS
+.DS_Store
+
+# IDE
+.vscode/
+
+# Large data files
+*.mat
+*.pth
+*.h5
+*.hdf5
+
+# Datasets (too large for git)
+Simulated_flattop/dataset/
+Simulated_flattop/dataset_finetune/
+
+# Logs
+*.log
+
+# Temporary Office files
+.~*
+
+# Output images (optional, uncomment if you want to track them)
+# simulation_outputs/
+# Simulated_flattop/flattop_cnn_outputs/
+other/

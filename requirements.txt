@@ -1,0 +1,7 @@
+numpy
+scipy
+matplotlib
+torch
+h5py
+streamlit
+plotly

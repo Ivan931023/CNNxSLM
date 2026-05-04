@@ -1,0 +1,312 @@
+\documentclass[12pt,a4paper]{article}
+
+% ====== 引入必要的套件 ======
+\usepackage{xeCJK} % 支援中文字體
+\setCJKmainfont{PingFang TC} % Mac 預設繁體中文字體，Windows 可改為 Microsoft JhengHei
+\usepackage{graphicx} % 支援圖片
+\usepackage{amsmath, amssymb} % 支援數學公式與符號
+\usepackage{hyperref} % 支援超連結
+\usepackage{geometry} % 設定版面邊距
+\geometry{a4paper, margin=1in}
+\usepackage{listings} % 支援程式碼區塊
+\usepackage{xcolor} % 支援文字顏色
+\usepackage{booktabs} % 專業表格線條
+\usepackage{longtable} % 支援長表格
+
+% ====== 程式碼高亮設定 ======
+\definecolor{codegreen}{rgb}{0,0.6,0}
+\definecolor{codegray}{rgb}{0.5,0.5,0.5}
+\definecolor{codepurple}{rgb}{0.58,0,0.82}
+\definecolor{backcolour}{rgb}{0.95,0.95,0.92}
+
+\lstset{
+    backgroundcolor=\color{backcolour},   
+    commentstyle=\color{codegreen},
+    keywordstyle=\color{magenta},
+    numberstyle=\tiny\color{codegray},
+    stringstyle=\color{codepurple},
+    basicstyle=\ttfamily\footnotesize,
+    breakatwhitespace=false,         
+    breaklines=true,                 
+    captionpos=b,                    
+    keepspaces=true,                 
+    numbers=left,                    
+    numbersep=5pt,                  
+    showspaces=false,                
+    showstringspaces=false,
+    showtabs=false,                  
+    tabsize=4,
+    frame=single
+}
+
+\title{\textbf{以深度學習結合 Zernike 參數辨識之平頂光束自適應校正研究：\\核心原理解析與端到端系統實作}}
+\author{專案技術研究報告}
+\date{\today}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+本技術報告詳述了一套端到端（End-to-End）基於深度學習之無波前感測器自適應光學（Sensorless Adaptive Optics）系統。本專案將傳統波前像差校正轉化為「單一張光強圖至多維連續參數」的深度學習迴歸問題。本報告完美融合了初期研究提案之理論框架與最終專案的高效能實作結果，深入剖析整體系統的閉迴路架構、高維度空間採樣機制、Zernike 波前校正物理理論、純量傅立葉光學的嚴謹推導、PyTorch MPS 硬體加速機制、卷積神經網路（CNN）核心理論、模型訓練優化策略，以及具備自適應迭代校正的視覺化 Web 應用程式。本研究建立了一條明確可擴充、且有望突破平頂光束不平整度 1\% 限制之技術路徑。
+\end{abstract}
+
+\newpage
+
+% ==========================================
+\section{緒論與研究動機}
+
+\subsection{研究背景與問題描述}
+本研究的核心目標，是透過空間光調變器（Spatial Light Modulator, SLM）調製射入波的相位，使反射波在 CCD 上形成接近平頂（Flat-top）的光強分布。然而在實際實驗中，常受到失焦（Defocus）、散光（Astigmatism）、球差（Spherical Aberration）等非理想因素影響。目前系統不平整度難以低於 1\%，顯示依靠人工調整相位參數已達極限。當補償模型使用 Zernike 多項式描述時，參數高達 15 維，面臨高維搜尋空間過大與人工判讀效率過低的問題。
+
+\subsection{研究動機與創新性貢獻}
+不同像差模式會在成像面上留下特定的強度分布特徵。若能訓練一個模型，直接從 CCD 量測到的強度圖回推 Zernike 係數，即可將人工調整轉化為資料驅動的自動補償流程。
+本研究之創新性體現於：
+\begin{enumerate}
+    \item \textbf{波前校正轉化為多輸出迴歸問題}：以 CNN 取代傳統依賴人工經驗的反覆掃描。
+    \item \textbf{結合 Zernike 模型與 CNN 辨識器}：物理可解釋性與資料驅動互補。
+    \item \textbf{導入閉迴路自適應校正（Closed-loop Correction）}：模型作為估測器，直接參與即時補償迭代。
+\end{enumerate}
+
+% ==========================================
+\section{整體系統架構與閉迴路概念 (System Architecture)}
+
+為達成全自動化的像差校正，本專案的整體系統架構被設計為一條涵蓋三大核心模組的端到端資料流（Data Pipeline），形成一個從「觀測」、「辨識」到「補償」的完整閉迴路（Closed-loop）：
+
+\begin{figure}[h]
+    \centering
+    % 請在此處替換為您的系統架構圖
+    % \includegraphics[width=0.8\textwidth]{figures/system_architecture.png}
+    \caption{無波前感測器自適應光學閉迴路系統架構圖}
+    \label{fig:architecture}
+\end{figure}
+
+\subsection{1. 物理前向模型 (Forward Physical Model)}
+此模組為資料生成的源頭。其任務為：給定一組隨機的 14 維 Zernike 像差係數後，描述 SLM 相位調製如何影響並產生對應的 CCD 平頂強度分布。我們使用了純量傅立葉光學進行嚴格建模，並輔以 PyTorch 硬體加速產生海量「成對資料（Intensity Image $\leftrightarrow$ Zernike Coefficients）」。
+
+\subsection{2. 深度學習波前估測器 (Deep Learning Estimator)}
+此模組為系統的大腦。其任務為接受單張受畸變污染的灰階 CCD 光強圖，透過內部深層的卷積神經網路（CNN）提取空間特徵，最終輸出一組 14 維連續向量 $\hat{\mathbf{z}}$。這代表模型「看懂」了影像中隱含的像差成分。
+
+\subsection{3. 自適應迭代控制器 (Adaptive Iterative Controller)}
+此模組負責執行實際校正。根據估測器給出的預測結果 $\hat{\mathbf{z}}$，控制器會產生一組反向的「共軛相位」，更新並疊加至 SLM 的當前補償矩陣中。每次量測與更新視為一次迭代，系統將逐步撫平光斑畸變，逼近理想平頂分布。
+
+% ==========================================
+\section{Zernike 波前像差理論與共軛校正物理}
+
+為使光學補償具備嚴格的數學與物理基礎，本專案選用 Zernike 圓柱多項式（Zernike Polynomials）作為描述波前畸變的標準正交基底。
+
+\subsection{Zernike 多項式之數學定義與正交性}
+給定極座標 $(\rho, \theta)$，Zernike 多項式 $Z_n^m(\rho, \theta)$ 定義為：
+\begin{equation}
+Z_n^m(\rho, \theta) = 
+\begin{cases} 
+R_n^m(\rho) \cos(m\theta), & \text{for } m > 0 \\ 
+R_n^m(\rho), & \text{for } m = 0 \\ 
+R_n^m(\rho) \sin(|m|\theta), & \text{for } m < 0 
+\end{cases}
+\end{equation}
+此處的徑向多項式 $R_n^m(\rho)$ 由下式給出：
+\begin{equation}
+R_n^m(\rho) = \sum_{s=0}^{(n-|m|)/2} \frac{(-1)^s (n-s)!}{s! \left(\frac{n+|m|}{2}-s\right)! \left(\frac{n-|m|}{2}-s\right)!} \rho^{n-2s}
+\end{equation}
+Zernike 多項式在單位圓盤內部滿足絕對的正交性（Orthogonality）：
+\begin{equation}
+\int_0^{2\pi} \int_0^1 Z_n^m(\rho, \theta) Z_{n'}^{m'}(\rho, \theta) \rho \, \mathrm{d}\rho \, \mathrm{d}\theta = \frac{\pi}{n+1} \delta_{nn'} \delta_{mm'}
+\end{equation}
+這項特性意味著：任何複雜的波前形變皆可被唯一且無耦合地拆解為各個 Zernike 模式的線性疊加。
+
+\subsection{非活塞 (Non-Piston) 像差模式定義與物理對應}
+為了精確描述實驗中常見之非理想效應，本研究選用 14 階（若算入平移模式共 15 階）之 Zernike 多項式子集。詳細的徑向階數 $n$、角向頻率 $m$ 以及對應的經典賽德爾像差（Seidel Aberration）如表 \ref{tab:zernike_modes} 所示：
+
+\begin{table}[ht]
+\centering
+\caption{本專案使用之 Zernike 像差模式定義}
+\label{tab:zernike_modes}
+\begin{tabular}{@{}ccll@{}}
+\toprule
+\textbf{索引} & \textbf{($n$, $m$)} & \textbf{模式名稱 (Mode Name)} & \textbf{物理意義 (Physical Meaning)} \\ \midrule
+0 & (1, -1) & Tilt Y & Y 軸傾斜 (位移) \\
+1 & (1, 1) & Tilt X & X 軸傾斜 (位移) \\
+2 & (2, -2) & Astigmatism $45^\circ$ & 45度角散光 \\
+3 & (2, 0) & Defocus & 離焦 (縱向焦點偏移) \\
+4 & (2, 2) & Astigmatism $0^\circ$ & 0度角散光 (十字拉伸) \\
+5 & (3, -3) & Trefoil Y & Y 軸三葉草畸變 \\
+6 & (3, -1) & Coma Y & Y 軸彗差 (拖尾效應) \\
+7 & (3, 1) & Coma X & X 軸彗差 \\
+8 & (3, 3) & Trefoil X & X 軸三葉草畸變 \\
+9 & (4, -4) & Quadrafoil Y & 四葉草畸變 \\
+10 & (4, -2) & Secondary Astig $45^\circ$ & 二階散光 \\
+11 & (4, 0) & Primary Spherical & 初階球差 (邊緣擴散) \\
+12 & (4, 2) & Secondary Astig $0^\circ$ & 二階散光 \\
+13 & (4, 4) & Quadrafoil X & 四葉草畸變 \\
+14 & (5, -1) & Secondary Coma Y & 二階彗差 \\ \bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{共軛相位補償理論 (Phase Conjugation)}
+若 CNN 預測出殘餘波前誤差 $W_{error}(\rho, \theta) = \sum \hat{Z}_i Z_{base}^{(i)}$，我們便可生成一組符號相反的「共軛相位」進行抵銷：
+\begin{equation}
+W_{corrected} = W_{error} + W_{SLM} = W_{error} + (- W_{error}) \approx 0
+\end{equation}
+
+% ==========================================
+\section{概念驗證原型：代理前向模型設計 (Surrogate Forward Model)}
+
+在進入龐大的傅立葉光學傳播計算前，本專案建立了一個「可執行研究原型」，透過代理模型快速驗證 CNN 工作流。
+
+\subsection{代理模型的物理直觀與實作機制}
+\texttt{FlatTopZernikeSimulator} 的核心邏輯包含：
+\begin{enumerate}
+    \item \textbf{幾何扭曲 (Spatial Warping)}：利用波前空間梯度 $\nabla W$ 產生位移場 $dx, dy$。
+    \item \textbf{高斯模糊 (Gaussian Blur)}：依據像差 RMS 調變模糊半徑 $\sigma$，模擬失焦。
+    \item \textbf{亮度調變 (Shading Modulation)}：使用波前拉普拉斯算子 $\nabla^2 W$ 反映局部曲率明暗。
+\end{enumerate}
+
+\subsection{程式實作範例}
+\begin{lstlisting}[language=Python, caption={代理前向模型之核心實作}]
+def simulate(self, coeffs: np.ndarray, add_noise: bool = True):
+    wavefront = np.tensordot(coeffs, self.basis, axes=(0, 0))
+    dx = np.tensordot(coeffs, self.basis_dx, axes=(0, 0))
+    dy = np.tensordot(coeffs, self.basis_dy, axes=(0, 0))
+
+    xw = self.xx + self.cfg.warp_scale * dx
+    yw = self.yy + self.cfg.warp_scale * dy
+    # ... (省略座標映射與模糊處理細節) ...
+    shading = 1.0 + self.cfg.shading_scale * laplace(wavefront)
+    return image.astype(np.float32)
+\end{lstlisting}
+
+% ==========================================
+\section{純量傅立葉光學模型與平頂光相位設計}
+
+\subsection{解析平頂光相位與 Zernike 疊加}
+給定高斯光束尺寸 $a_1$ 與目標寬度 $a_2$，解析相位 $\Phi_x(x)$ 為：
+\begin{equation}
+\Phi_x(x) = \frac{1}{\lambda f} \left[ \sqrt{2\pi} a_1 a_2 \exp\left(-2\left(\frac{x}{a_1}\right)^2\right) + 2\pi a_2 x \operatorname{erf}\left(\frac{\sqrt{2}}{a_1} x\right) \right]
+\end{equation}
+系統的調變總相位 $\Phi_{total}(x, y)$ 為解析相位、光柵相位與 Zernike 波前 $W_{error}$ 的疊加：
+\begin{equation}
+\Phi_{total}(x,y) = \left[ \Phi_{analytic}(x,y) + \Phi_{grating}(x,y) + \pi \sum_{j=2}^{15} Z_j \cdot Z_{base}^{(j)}(x,y) \right] \bmod 2\pi
+\end{equation}
+焦平面 CCD 強度分布 $I(u,v)$ 為離散傅立葉逆轉換（IDFT）之絕對值平方：
+\begin{equation}
+I(u,v) = \left| \mathcal{F}^{-1} \left\{ A(x,y) \exp[i \Phi_{total}(x,y)] \right\} \right|^2
+\end{equation}
+
+% ==========================================
+\section{多維空間蒙地卡羅採樣機制與硬體加速}
+
+為確保 CNN 能學習到真實且複雜的光斑變異，資料集的「採樣機制」與「多樣性」是本專案成敗的關鍵。
+
+\subsection{高維度蒙地卡羅採樣機制 (Monte Carlo Sampling Mechanism)}
+傳統研究常採用逐一擾動單一模式的方法。然而，面對 $N=14$ 的參數空間，若進行間隔為 $\Delta=0.1$ 的網格搜尋（Grid Search），將產生 $41^{14}$ 組數據，陷入「維度詛咒（Curse of Dimensionality）」。
+此外，在真實實驗中，像差極少單獨出現，各 Zernike 模式之間存在**光強特徵的非線性耦合（Cross-talk Coupling）**。若模型只看過單一模式，在面臨混合畸變時將徹底失效。
+
+因此，本研究採納**高維蒙地卡羅同時採樣機制**：
+\begin{enumerate}
+    \item 針對 14 個 Zernike 參數，我們使用獨立的均勻分布（Uniform Distribution）進行同時抽樣，設定值域為 $Z_j \sim \mathcal{U}(-2.0, 2.0)$。
+    \item 這種「完全隨機混疊」的策略，強迫 CNN 神經網路去學習在高度非線性干涉下，如何將糾纏的空間紋理解耦（Decoupling），還原出各自獨立的正交係數。
+\end{enumerate}
+
+\subsection{PyTorch MPS 硬體加速產生巨量資料}
+為解決 MATLAB $7620 \times 7620$ 矩陣計算瓶頸以生產 $50,000$ 筆資料，我們透過 \texttt{torch.einsum} 執行無迴圈的張量內積，並卸載至 Apple Silicon (MPS) 加速：
+\begin{lstlisting}[language=Python, caption={均勻抽樣機制與高速繞射傳輸 (PyTorch)}]
+# 1. 均勻抽樣: 隨機生成 14 個 Zernike 係數，值域 [-2.0, 2.0]
+Z_batch = torch.rand(bs, 15, device=device) * 4.0 - 2.0
+
+# 2. Einsum 張量收縮疊加 Zernike 波前
+Z_sum = torch.einsum('bi,ixy->bxy', Z_batch, Z_basis)
+
+# 3. 總相位合成與 IDFT 傳播至焦平面
+Total_phase = Blazed_phi + theta_rad + (Z_sum + 1.0) * math.pi * Pupil_mask
+phase = torch.fmod(Total_phase, 2 * math.pi)
+
+phase_part = torch.fft.fftshift(torch.fft.ifft2(
+    torch.fft.ifftshift(Input_batch * torch.exp(1j * phase), dim=(-2, -1))
+), dim=(-2, -1))
+\end{lstlisting}
+
+% ==========================================
+\section{卷積神經網路架構設計與模型優化}
+
+\subsection{卷積神經網路核心理論}
+\subsubsection{1. 卷積運算理論 (Convolution Operation)}
+離散二維空間互相關（2D Cross-correlation）運算公式：
+\begin{equation}
+Y(i, j) = (X * W)(i, j) = \sum_{m} \sum_{n} X(i+m, j+n) W(m, n) + b
+\end{equation}
+\subsubsection{2. 批次正規化 (Batch Normalization)}
+\begin{equation}
+\hat{x}_i = \frac{x_i - \mu_{\mathcal{B}}}{\sqrt{\sigma^2_{\mathcal{B}} + \epsilon}}, \quad y_i = \gamma \hat{x}_i + \beta
+\end{equation}
+\subsubsection{3. 非線性激活函數 (ReLU Non-linearity)}
+\begin{equation}
+f(x) = \max(0, x)
+\end{equation}
+\subsubsection{4. 池化降採樣理論 (Pooling \& Aggregation)}
+\begin{equation}
+y_{i, j} = \max_{m,n \in \{0, 1\}} X_{2i+m, 2j+n}
+\end{equation}
+
+\subsection{多輸出迴歸與 Huber Loss}
+優化目標選用 Huber Loss $L_{Huber}$ 以降低極端異常值干擾：
+\begin{equation}
+L_{Huber}(y_i, \hat{y}_i) = 
+\begin{cases} 
+\frac{1}{2\beta} (y_i - \hat{y}_i)^2, & \text{if } |y_i - \hat{y}_i| < \beta \\ 
+|y_i - \hat{y}_i| - \frac{\beta}{2}, & \text{otherwise} 
+\end{cases}
+\end{equation}
+
+\subsection{模型訓練策略與優化器 (Training Strategies)}
+在完成 $50,000$ 筆資料生成後，資料集以 $80\%$ 與 $20\%$ 的比例隨機切分為訓練集（Training Set）與驗證集（Validation Set）。
+為了使模型能在高維度非凸空間（Non-convex Space）中順利找到全局最小值（Global Minimum），本專案選用 \textbf{Adam 優化器}，其結合了動量（Momentum）與自適應學習率（Adaptive Learning Rate）的優勢。
+同時，訓練管線引入了 \textbf{Cosine Annealing LR} 退火排程策略。學習率 $\eta_t$ 會隨著訓練進程依據餘弦函數平滑下降：
+\begin{equation}
+\eta_t = \eta_{min} + \frac{1}{2}(\eta_{max} - \eta_{min})\left(1 + \cos\left(\frac{T_{cur}}{T_{max}}\pi\right)\right)
+\end{equation}
+此策略能幫助網路在初期快速跨越局部最小值，並在訓練末期以極小步長穩定收斂於最優權重。
+
+\begin{figure}[h]
+    \centering
+    % 請在此處替換為您的訓練收斂曲線圖
+    % \includegraphics[width=0.6\textwidth]{figures/training_loss.png}
+    \caption{模型訓練之 Huber Loss 收斂曲線}
+    \label{fig:loss}
+\end{figure}
+
+% ==========================================
+\section{應用程式佈署與自適應校正機制}
+
+\subsection{平頂光束不平整度定義 (Flatness Non-uniformity)}
+為達成計畫書中設定的「不平整度低於 1\%」門檻，我們必須建立客觀的物理量化指標。在光斑的平頂目標區域（Region of Interest, ROI）內，不平整度 $\text{Flatness}$ 定義為該區域強度的相對標準差（Relative Standard Deviation）：
+\begin{equation}
+\text{Flatness} = \frac{\sigma_{ROI}}{\mu_{ROI}} \times 100\%
+\end{equation}
+其中 $\sigma_{ROI}$ 為局部強度的標準差，$\mu_{ROI}$ 為平均強度。在我們的控制迴路中，每一次迭代都會監控此指標之衰減狀況。
+
+\subsection{視覺化 App 與 RMS 誤差診斷}
+根據 Zernike 數學正交性，整體波前方均根誤差（$\text{RMS}$）等價於：
+\begin{equation}
+\text{RMS} = \sqrt{\frac{1}{14} \sum_{j=2}^{15} (\hat{Z}_j)^2}
+\end{equation}
+
+\subsection{自適應迭代校正機制 (Adaptive Iterative Correction)}
+每次量測後，依循共軛補償精神，透過下式更新補償向量 $\mathbf{c}^{(k)}$，逼近理想平頂：
+\begin{equation}
+\mathbf{c}^{(k+1)} = \mathbf{c}^{(k)} - \eta \cdot \hat{\mathbf{z}}^{(k)}
+\end{equation}
+
+% ==========================================
+\section{結論與未來挑戰展望}
+
+綜合而言，本專案提出並完整實作了一套以深度學習為核心的平頂光束自適應校正方案。我們建立了一條明確可擴充的技術路徑：確立了前向模型、估測器與控制器的整體系統架構，透過混合抽樣解決了模式耦合干擾，並完成 GPU 加速傅立葉光學模型與 CNN 的端到端佈署。
+
+未來挑戰與因應策略：
+\begin{enumerate}
+    \item \textbf{Domain Gap}：導入真實 CCD 散粒雜訊，並以量測資料進行遷移學習微調。
+    \item \textbf{Zernike Mode 耦合}：若精度不足，可引入 ResNet 殘差結構。
+    \item \textbf{控制迴路穩定性}：設計步長衰減與置信度權重以防震盪。
+\end{enumerate}
+
+\end{document}

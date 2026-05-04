@@ -1,0 +1,15 @@
+我幫您寫好了一個非常方便的工具腳本 generate_custom_zernike.py！
+這個腳本讓您可以直接在終端機（Terminal）透過輸入指令來調整您想要的 Zernike 係數（從 --Z1 到 --Z15 都可以調），且沒有設定的維度預設就是 0.0。
+請在終端機進入 Simulated_flattop 資料夾，並啟用虛擬環境，然後您可以用下面這種方式呼叫腳本：
+
+範例 1：只調整 Z4 (離焦) 和 Z5 (散光)，並存成 my_test.png
+python generate_custom_zernike.py --Z4 1.5 --Z5 -0.5 --output my_test.png
+
+範例 2：產生一個純理想的光斑 (全部預設為 0)
+python generate_custom_zernike.py --output pure_zero.png
+
+範例 3：想看看有哪些參數可以下？
+python generate_custom_zernike.py --help
+
+執行後，腳本會在螢幕上印出它吃到了哪些非零的係數，然後瞬間幫您生出對應光斑的圖片。
+您可以馬上用這個腳本生成帶有特定擾動的光斑，然後丟給 Streamlit App 測試，看看我們剛剛練出來的終極大腦是不是能超精準地把您輸入的數字預測出來！

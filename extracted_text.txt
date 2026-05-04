@@ -1,0 +1,735 @@
+以深度學習結合Zernike參數辨識之平頂光束自適應校正研究
+陳子彬
+April 22, 2026
+1研 研 研究 究 究背 背 背景 景 景與 與 與問 問 問題 題 題描 描 描述 述 述
+本研究的核心目標，是透過空間液晶調製器（Spatial Light Modulator, SLM）調製射入波的相
+位，使反射波在CCD上形成接近平頂（flat-top）的光強分布。理想情況下，平頂光束應具有均
+勻、平坦且邊界可控的強度輪廓，然而在實際實驗中，常受到失焦、散光、球差、像差耦合、光
+學元件裝配誤差以及環境擾動等非理想因素影響，使得最終量測到的光強分布存在起伏與不平
+整。
+目前系統雖已能產生接近平頂的分布，但不平整度難以低於1%，顯示僅依靠人工調整相位參數已
+接近極限。尤其當補償模型使用Zernike polynomials描述非理想波前時，若需要調整的參數數量
+達15維，便會面臨高維搜尋空間過大、參數彼此耦合以及人工判讀效率過低的問題。因此，本研
+究希望發展一套結合深度學習與閉迴路控制的自適應調整方法，讓系統能夠由單張CCD光強圖自
+動辨識其所對應的Zernike畸變成分，進一步更新補償參數並反覆迭代，最終突破現有人工調整的
+效能上限。
+2研 研 研究 究 究動 動 動機 機 機
+Zernike多項式是描述圓孔徑波前誤差的標準工具，在光學工程中廣泛用於表
+示defocus、astigmatism、coma、spherical aberration等常見像差。由於不同像差模式會在焦平
+面或成像面上留下特定的強度分布特徵，因此若能訓練一個模型，讓它直接從CCD量測到的強度
+圖回推15維Zernike係數，即可將原本高度依賴經驗的人工調整，轉化為資料驅動的快速辨識與自
+動補償流程。
+深度學習特別適合處理此類「影像輸入、連續參數輸出」的問題。相較於手工萃取特徵或逐一掃
+描參數，卷積神經網路（CNN）可以自動學習光斑紋理、局部對稱性、邊界變形與能量分布等特
+徵，並將它們映射到對應的Zernike係數空間。因此，本研究不將問題視為分類，而是定義為多 多 多輸 輸 輸
+出 出 出回 回 回歸 歸 歸：輸入一張灰階CCD強度圖，輸出一個15維連續向量
+ˆz= (ˆz1,ˆz2, . . . ,ˆz15),
+其中ˆzi 表示第i個Zernike mode的估計係數。藉此，模型不僅能做一次性的誤差診斷，也可作為
+自適應控制迴路中的估測器（estimator），在每次量測後提出修正方向。
+1
+3研 研 研究 究 究目 目 目標 標 標
+本研究擬達成以下四項目標：
+1.建立可描述平頂光束與Zernike畸變之模擬資料產生器，系統性生成訓練所需的光強圖與參
+數標籤。
+2.設計並訓練一個以CNN為核心的多輸出回歸模型，使其能由單張強度圖預測15維Zernike係
+數。
+3.建立自適應迭代校正流程，利用模型輸出更新SLM補償參數，逐步降低平頂光束的不平整
+度。
+4.將模擬架構延伸至實驗平台，最終實現可上機運作的closed-loop自適應光場校正系統。
+4研 研 研究 究 究方 方 方法 法 法
+4.1系 系 系統 統 統概 概 概念 念 念
+整體系統可分為三個層次：
+(a)前 前 前向 向 向光 光 光學 學 學模 模 模型 型 型（ （ （forward model） ） ）：描述給定Zernike係數後，SLM相位調製如何影響CCD
+量測到的平頂強度分布。
+(b)深 深 深度 度 度學 學 學習 習 習估 估 估測 測 測器 器 器：由量測圖像回推隱含其中的Zernike畸變成分。
+(c)自 自 自適 適 適應 應 應控 控 控制 制 制器 器 器：根據估測結果更新補償向量，使系統逐步逼近理想平頂分布。
+此三者結合後，即形成從「觀測」到「辨識」再到「補償」的完整閉迴路架構。
+4.2訓 訓 訓練 練 練資 資 資料 料 料的 的 的模 模 模擬 擬 擬生 生 生成 成 成
+研究第一步是建立資料集。由於實驗初期通常缺乏大量帶標籤的真實量測資料，因此將先以模擬
+方式生成訓練集。其基本流程如下：
+1.定義15個欲補償的Zernike modes與其係數範圍。
+2.在每次生成樣本時，從各係數範圍中隨機取樣，形成一組15維參數向量。
+3.將各mode線性組合成總波前誤差，疊加於理想平頂光束相位上。
+4.經由前向模型計算對應的CCD強度圖，並加入合理的噪聲、位移、增益偏差與解析度限
+制，以模擬實際量測情況。
+2
+5.以生成之強度圖作為輸入，以對應的15維Zernike係數作為標籤，建立監督式學習資料集。
+值得注意的是，訓練資料不應只侷限於單一mode單獨擾動，而應以15維隨機疊加的方式生成。
+原因在於真實實驗中的像差通常同時存在，且彼此效應會交互耦合。若模型只看過單一mode的樣
+本，將難以應對實際環境中的混合畸變。
+4.3 CNN回 回 回歸 歸 歸模 模 模型 型 型架 架 架構 構 構
+本研究採用CNN作為基礎模型，理由是光強圖中的局部紋理、邊緣變形與空間分布特徵，都適合
+透過卷積層進行抽取。模型的輸入與輸出形式如下：
+•輸入：1×H×W的單通道灰階CCD強度圖。
+•輸出：15維連續值向量，對應15個Zernike係數。
+一個可直接執行的demo架構如下：
+1. 4層卷積模組，逐層抽取低階到高階空間特徵。
+2.每層搭配非線性活化函數與池化操作，以提升模型對局部特徵與尺度變化的描述能力。
+3.經過flatten後接上數層全連接層，將影像特徵映射至15維係數空間。
+4.輸出層不使用分類機率，而直接輸出15個連續值。
+在損失函數方面，選擇SmoothL1Loss作為初始設定。相較於單純的MSE，SmoothL1對少數大誤
+差樣本較為穩定，可降低訓練初期因個別難例造成的不穩定振盪。未來若要進一步強化模型對最
+終平頂品質的敏感度，也可設計混合損失函數，例如：
+L=λ 1Lcoeff +λ 2Lflatness,
+其中Lcoeff 為係數預測誤差，L flatness 則根據重建或補償後的光強均勻度定義，使模型不僅學會回
+推係數，也朝向降低平頂不平整度的最終應用目標。
+4.4訓 訓 訓練 練 練流 流 流程 程 程
+模型訓練將依下列步驟進行：
+1.利用模擬器大量生成訓練集、驗證集與測試集。
+2.將光強圖正規化後輸入CNN，輸出預測的15維係數。
+3.以SmoothL1Loss計算預測係數與真值之差異。
+3
+4.使用Adam或AdamW作為最佳化器，進行多epoch訓練。
+5.透過驗證集監控loss、每一維係數誤差以及整體預測穩定性。
+6.於測試階段檢視模型對未見樣本的泛化能力，並分析哪些mode較容易或較困難辨識。
+在報告與demo中，可同步輸出訓練曲線、單張測試圖之預測結果、真值與預測值比較，以及補償
+前後的強度分布圖，作為模型有效性的佐證。
+4.5自 自 自適 適 適應 應 應迭 迭 迭代 代 代校 校 校正 正 正機 機 機制 制 制
+本研究的重點不僅在於「辨識」，更在於「辨識後能立即調整」。因此在模型完成訓練後，將其
+嵌入自適應迭代控制流程。每次CCD取得新的強度圖後，模型估測當前殘留畸變為 ˆz(k)，再依以
+下更新式修正補償向量：
+z(k+1)
+corr =z (k)
+corr −η ˆz(k),
+其中η為更新步長。若估測結果正確，則系統每次迭代都會削弱當前像差成分，使平頂分布逐步趨
+於均勻。此方法的優點在於：
+•不需人工逐一掃描15維參數；
+•可快速回應環境擾動或系統漂移；
+•容易與現有SLM控制流程整合，形成真正可上機的closed-loop校正。
+5 Zernike CNN Demo程 程 程式 式 式設 設 設計 計 計與 與 與實 實 實作 作 作說 說 說明 明 明
+為了讓研究構想不只停留在方法描述層次，本研究同步規劃一份可直接執行的PyTorch範例程
+式zernike cnn demo.py，作為整個研究流程的prototype。此demo的目的，不是立即完整重現實
+驗室中的SLM與傅立葉光學傳播系統，而是先建立一條可驗證的深度學習工作流，將「資料生
+成」、「模型訓練」、「係數預測」與「自適應校正」四個模組串接起來，使研究者能快速檢驗
+由單張CCD光強圖反推Zernike係數的可行性。
+此程式的核心功能可概括為五項：
+1.建立理想平頂光強分布作為target intensity map。
+2.使用15個Zernike係數，透過surrogate forward model產生受像差影響的失真光強圖。
+3.訓練一個CNN回歸模型，將輸入影像映射為15維係數向量。
+4.示範adaptive correction流程，重複估測殘差像差並逐步扣除。
+5.輸出訓練曲線、預測結果、校正前後比較圖與訓練後模型權重。
+4
+5.1 Demo的 的 的定 定 定位 位 位與 與 與研 研 研究 究 究意 意 意義 義 義
+此demo屬於「可執行研究原型」，其價值在於先驗證機器學習pipeline是否成立，而非直接
+取代真實光學系統。程式中所使用的FlatTopZernikeSimulator.simulate()是一個surrogate
+model，它用空間扭曲、模糊、陰影變化與雜訊等方式模擬Zernike像差對平頂光斑的影響，因此
+具有物理直觀性，但仍不是實驗平台上精確的SLM+CCD forward model。
+換言之，這份demo可用來回答下列關鍵研究問題：
+•若輸入為單張強度圖，CNN是否能有效學會對應的15維Zernike係數？
+•在surrogate model下訓練出的估測器，是否能支援閉迴路adaptive correction？
+•若整體流程成立，後續要替換成真實光學模型時，哪些模組可以直接沿用？
+因而，此demo在研究流程中的角色可視為正式上機前的驗證平台。完成此平台後，後續只需將模
+擬器替換為真實的光學傳播計算，或直接改用已知Zernike設定下量測到的CCD影像，即可逐步
+銜接到實驗應用。
+5.2程 程 程式 式 式整 整 整體 體 體架 架 架構 構 構
+zernike cnn demo.py的程式架構可分為七個模組：
+1.參 參 參數 數 數與 與 與模 模 模式 式 式定 定 定義 義 義：設定亂數種子、計算裝置、15個Zernike modes名稱與對應階數。
+2.Zernike基 基 基底 底 底生 生 生成 成 成：建立圓孔徑座標網格，計算Zernike radial polynomial與完整基底函
+數。
+3.前 前 前向 向 向模 模 模擬 擬 擬器 器 器：由理想平頂target出發，根據係數生成失真影像。
+4.資 資 資料 料 料集 集 集模 模 模組 組 組：隨機生成大量係數向量與對應影像，組成監督式訓練資料。
+5.CNN回 回 回歸 歸 歸模 模 模型 型 型：以卷積層與全連接層構成多輸出回歸網路。
+6.訓 訓 訓練 練 練與 與 與推 推 推論 論 論模 模 模組 組 組：包含epoch訓練函式、驗證流程與單張影像係數預測。
+7.自 自 自適 適 適應 應 應校 校 校正 正 正與 與 與視 視 視覺 覺 覺化 化 化：執行iterative correction，並輸出訓練曲線與比較圖。
+如此設計的優點是模組邊界清楚。未來若要將demo升級為實驗版本，最主要需更換的是前向模擬
+器與資料來源，其餘如資料流、模型架構、訓練與adaptive loop可大致保留。
+5.3 15個 個 個Zernike模 模 模式 式 式的 的 的定 定 定義 義 義
+程式中選用15個non-piston Zernike modes，涵蓋傾斜、散光、離焦、彗差、三葉像差、球差與更
+高階模式。其目的在於建立一個足以描述多種實驗常見非理想效應的參數空間。模式定義如下：
+5
+索引模式名稱
+0 tilt y
+1 tilt x
+2 astig 45
+3 defocus
+4 astig 0
+5 trefoil y
+6 coma y
+7 coma x
+8 trefoil x
+9 quadrafoil y
+10 secondary astig 45
+11 primary spherical
+12 secondary astig 0
+13 quadrafoil x
+14 secondary coma y
+在程式中，每個Zernike mode都會先被標準化，使其在圓孔徑內具有可比較的尺度。這樣做的好
+處，是讓不同模式的係數大小更具有一致性，也讓神經網路的學習更穩定。
+5.4 Surrogate forward model的 的 的設 設 設計 計 計邏 邏 邏輯 輯 輯
+FlatTopZernikeSimulator是此demo的核心。它的流程不是直接計算完整繞射傳播，而是以
+「具光學意義的近似失真機制」來模擬實驗中可能觀察到的強度變形。其步驟如下：
+1.先建立理想平頂光斑作為target image。
+2.將輸入的15維Zernike係數與基底做線性組合，形成總波前誤差W(x, y)。
+3.對波前取空間梯度，得到影像空間中的位移場dx, dy，模擬像差引起的幾何扭曲。
+4.依據係數RMS大小決定高斯模糊強度，對應成像失焦或高階畸變造成的模糊。
+5.使用波前的Laplacian建立shading項，反映局部能量分布與曲率造成的亮度調變。
+6.最後加入隨機雜訊，使資料更接近真實CCD量測。
+這種surrogate設計雖然不是完整物理模型，但它可以保留「不同Zernike係數造成不同空間紋理變
+化」這項重要特性，因此足以支撐CNN對像差成分的辨識學習。
+5.5資 資 資料 料 料集 集 集生 生 生成 成 成方 方 方式 式 式
+ZernikeDataset類別會批次隨機產生係數向量，再透過simulator生成對應影像。每一筆樣本都
+包含：
+6
+•輸入：大小為1×64×64的單通道光強圖。
+•標籤：15維連續Zernike係數。
+demo預設生成800筆資料，並切分為80%訓練集與20%驗證集。這樣的規模足以用來演示整體流
+程，也能在合理時間內完成訓練。未來若替換為更擬真的forward model，則可進一步擴充資料量
+與參數分布範圍，以提升模型泛化能力。
+5.6 CNN回 回 回歸 歸 歸模 模 模型 型 型細 細 細節 節 節
+ZernikeRegressor採用四層卷積特徵抽取架構，並在最後接上全連接回歸頭。其設計理念如下：
+1.第一至第四層卷積模組逐步將通道數從1提升至128，以擷取從局部亮度變化到高階空間結構
+的特徵。
+2.每個ConvBlock包含兩層卷積、Batch Normalization與ReLU，可提升特徵表達與訓練穩定
+性。
+3.中間穿插MaxPool2d進行降採樣，使模型學會較大尺度的空間模式。
+4.最後使用AdaptiveAvgPool2d((1,1))壓縮空間維度，接著以全連接層輸出15個連續值。
+5.在回歸head中加入少量Dropout，可降低過擬合風險。
+此模型屬於中小型CNN，優點是結構清楚、參數量適中、容易訓練，也方便未來依需求升級為更
+深的backbone，例如ResNet類型結構。
+5.7訓 訓 訓練 練 練流 流 流程 程 程與 與 與損 損 損失 失 失函 函 函數 數 數
+程式中的訓練函式train model()採用以下設定：
+•損失函數：SmoothL1Loss
+•最佳化器：Adam
+•學習率排程：CosineAnnealingLR
+•訓練epoch：demo預設為5
+•批次大小：64
+在每一個epoch中，程式都會同時計算訓練集與驗證集上的loss與mean absolute error。這種設計
+有兩個目的：第一，可即時觀察模型是否收斂；第二，可透過驗證表現保存最佳權重，避免單純
+使用最後一輪參數而造成性能波動。
+由於此問題本質上是連續參數估測，因此不適合用分類交叉熵處理，而應使用回歸型損
+失。SmoothL1Loss相較MSE更不易受少數極端誤差支配，適合用於此類多維係數回歸任務。
+7
+5.8單 單 單張 張 張影 影 影像 像 像係 係 係數 數 數預 預 預測 測 測
+完成訓練後，可透過predict coeffs()將單張影像轉為模型輸入，並輸出15維預測向量。這對本
+研究非常重要，因為實驗上每次量測CCD後，控制器所需的就是這組估測係數。換句話說，模型
+在整個自適應系統中的角色，相當於即時波前像差判讀器。
+5.9自 自 自適 適 適應 應 應校 校 校正 正 正demo
+程式中的run adaptive loop()進一步展示模型如何被嵌入控制迴路。其更新機制可寫為：
+c(k+1) =c (k) −g ˆz(k),
+其中c(k) 為第k次迭代時的補償向量，g為增益， ˆz(k) 為模型對當前殘留像差的預測。demo會在
+每次迭代中紀錄三項資訊：
+1.目前的殘差係數RMS。
+2.平頂區域的不平整度指標（flatness non-uniformity）。
+3.每一步所生成的光強圖像。
+若模型估測方向正確，則殘差係數RMS與平頂不平整度都應隨迭代逐步下降。這正是本研究希望
+在真實實驗中達成的closed-loop改善效果。
+5.10輸 輸 輸出 出 出結 結 結果 果 果與 與 與可 可 可視 視 視化 化 化
+此demo會自動輸出多種圖表與模型檔案，包含：
+•training curve.png：呈現訓練與驗證loss的收斂情形。
+•prediction example.png：展示理想target、輸入失真圖，以及各mode的預測誤差。
+•adaptive correction.png：比較校正前後影像，並呈現flatness與殘差的迭代趨勢。
+•zernike cnn model.pt：保存訓練後模型權重、模式名稱與模擬設定。
+原始demo指定輸出至/mnt/data/demo outputs/。若在實驗室或本地研究環境中使用，亦可依需
+求改成研究資料夾中的相對路徑，以利與量測資料、訓練紀錄及版本控制整合。
+8
+5.11執 執 執行 行 行方 方 方式 式 式與 與 與環 環 環境 境 境需 需 需求 求 求
+此程式的執行方式非常直接，只需在安裝好numpy、scipy、matplotlib與torch的Python環境
+中執行：
+python zernike cnn demo.py
+程式會自動判斷是否有可用GPU，若無則使用CPU。對於demo規模的資料與模型而言，即使
+在CPU上也可完成示範性訓練，只是運行時間會較長。
+5.12如 如 如何 何 何銜 銜 銜接 接 接到 到 到真 真 真實 實 實實 實 實驗 驗 驗系 系 系統 統 統
+從研究落地的角度來看，這份demo最重要的不是單次執行結果，而是它指出了未來擴充的方向。
+若要將其轉換為真正可上機的研究工具，主要需要進行下列三項修改：
+1.將FlatTopZernikeSimulator.simulate()替換為真實的光學傳播模型，例如SLM相位調
+製加上傅立葉光學propagation的數值模擬。
+2.將訓練資料改為更貼近實驗的資料來源，包括真實CCD ROI、量測噪聲、曝光變化以及已
+知Zernike設定下取得的校正樣本。
+3.將訓練目標由單純係數誤差，進一步擴充成「係數估測+平頂品質」的混合目標，使模型更
+直接朝最終實驗指標最佳化。
+因此，這份demo不只是教學程式，更是一個研究開發的起點。它將抽象的深度學習想法具體化為
+可執行、可觀測、可逐步替換的工程流程，能有效降低從概念到實作之間的落差。
+6預 預 預期 期 期成 成 成果 果 果
+本研究預期完成以下成果：
+1.建立一套可直接執行的PyTorch CNN demo，內容包含Zernike參數定義、資料模擬、模型訓
+練、係數預測與自適應校正流程。
+2.驗證「單張光強圖回推15維Zernike係數」的可行性，並分析不同mode對辨識精度的影響。
+3.建立校正前後之平頂光強比較機制，以不平整度、均勻度與收斂速度作為量化指標。
+4.為後續導入真實SLM相位函式、CCD ROI與實驗量測資料微調（fine-tuning）奠定基礎。
+若模型與控制迴路運作順利，預期可較人工調整更穩定且更快速地壓低平頂不平整度，並朝突
+破1%門檻前進。
+9
+7研 研 研究 究 究創 創 創新 新 新性 性 性與 與 與貢 貢 貢獻 獻 獻
+本研究的創新性主要體現在以下三點：
+1.將 將 將波 波 波前 前 前像 像 像差 差 差校 校 校正 正 正問 問 問題 題 題轉 轉 轉化 化 化為 為 為影 影 影像 像 像到 到 到參 參 參數 數 數的 的 的回 回 回歸 歸 歸問 問 問題 題 題：以深度學習取代傳統依賴人工經驗的
+參數調整流程。
+2.將 將 將Zernike模 模 模型 型 型與 與 與CNN辨 辨 辨識 識 識器 器 器結 結 結合 合 合：使物理可解釋的像差表示法與資料驅動模型互補，兼
+顧可解釋性與實用性。
+3.導 導 導入 入 入閉 閉 閉迴 迴 迴路 路 路自 自 自適 適 適應 應 應校 校 校正 正 正：不只離線分析影像，而是讓模型直接參與實驗控制與即時補償。
+此研究若能完成，除了有助於提升平頂光束品質，也可作為其他光學整形、波前校正與智慧光學
+控制問題的技術原型。
+8可 可 可能 能 能遭 遭 遭遇 遇 遇的 的 的挑 挑 挑戰 戰 戰與 與 與因 因 因應 應 應策 策 策略 略 略
+雖然此方法具有高度潛力，但在實作上仍可能遭遇若干挑戰：
+1.模 模 模擬 擬 擬與 與 與真 真 真實 實 實實 實 實驗 驗 驗存 存 存在 在 在domain gap：若模擬器與實際光學系統差異過大，模型可能在實驗資
+料上性能下降。對策是逐步將真實光學機制、噪聲、ROI裁切與儀器非理想性納入forward
+model，並於後期使用真實量測資料進行微調。
+2.不 不 不同 同 同Zernike mode之 之 之間 間 間存 存 存在 在 在耦 耦 耦合 合 合：部分像差可能產生相似的光強特徵，造成辨識混淆。
+對策是提高資料多樣性、強化混合樣本比例，並評估是否需要更深的backbone或加入殘差結
+構。
+3.控 控 控制 制 制迴 迴 迴路 路 路可 可 可能 能 能收 收 收斂 斂 斂不 不 不穩 穩 穩：若更新步長過大，可能導致過度補償與震盪。對策是設計步長衰
+減、信心權重或混合PID/學習式控制策略，以提升實驗穩定性。
+9研 研 研究 究 究進 進 進度 度 度規 規 規劃 劃 劃
+本研究可初步規劃為三個階段：
+階段工作內容
+第一階段建立15維Zernike模擬器、定義平頂光束forward model、產生訓練資
+料並完成baseline CNN。
+第二階段完成模型訓練與驗證，分析各mode的辨識表現，建立單張圖回推係數
+與校正前後視覺化比較工具。
+第三階段將模型整合至實驗平台，串接實際SLM phase map與CCD量測，進
+行closed-loop自適應補償測試。
+10
+10結 結 結論 論 論
+綜合而言，本研究提出一套以深度學習為核心的平頂光束自適應校正方案，目標在於解決傳統人
+工調整15維Zernike參數時效率低、難以尋找最佳解的瓶頸。透過模擬資料建立、CNN多輸出回
+歸模型訓練，以及closed-loop參數更新機制，本研究希望讓系統具備由單張CCD強度圖自動判讀
+波前誤差並即時修正的能力。
+此計畫的價值不僅在於提供一個可直接執行的demo，更在於建立一條明確可擴充的技術路徑：先
+驗證深度學習能否從光強圖回推Zernike係數，再逐步替換成更接近實驗的forward model，最後以
+真實量測資料進行微調與上機驗證。若研究成果順利落地，將有望突破目前平頂光束不平整度難
+以低於1%的限制，並為智慧化光學控制建立具代表性的研究範例。
+A Zernike CNN Demo完 完 完整 整 整程 程 程式 式 式碼 碼 碼
+本附錄收錄本研究使用之zernike cnn demo.py完整程式碼。為了提升可讀性，程式中已補上補
+充註解，說明各模組在資料生成、模型訓練與自適應校正流程中的功能。若後續需銜接真實實驗
+系統，可優先修改程式中的FlatTopZernikeSimulator.simulate()與資料來源模組。
+1import os
+2os.environ.setdefault(’MPLCONFIGDIR’, ’/tmp/mplconfig’)
+3import math
+4import random
+5from dataclasses import dataclass
+6from typing import List, Tuple
+7
+8import matplotlib
+9matplotlib.use(’Agg’)
+10import matplotlib.pyplot as plt
+11import numpy as np
+12from scipy.ndimage import gaussian_filter, laplace, map_coordinates
+13
+14import torch
+15import torch.nn as nn
+16from torch.utils.data import DataLoader, Dataset, random_split
+17
+18# Fix random seeds for reproducibility.
+19SEED = 42
+20random.seed(SEED)
+21np.random.seed(SEED)
+22torch.manual_seed(SEED)
+23DEVICE = ’cuda’ if torch.cuda.is_available() else ’cpu’
+24
+25# Fifteen non-piston Zernike modes.
+26# Each tuple is (n, m, name) for one aberration mode.
+27ZERNIKE_MODES: List[Tuple[int, int, str]] = [
+28(1, -1, ’tilt_y’),
+29(1, 1, ’tilt_x’),
+30(2, -2, ’astig_45’),
+31(2, 0, ’defocus’),
+32(2, 2, ’astig_0’),
+33(3, -3, ’trefoil_y’),
+34(3, -1, ’coma_y’),
+35(3, 1, ’coma_x’),
+11
+36(3, 3, ’trefoil_x’),
+37(4, -4, ’quadrafoil_y’),
+38(4, -2, ’secondary_astig_45’),
+39(4, 0, ’primary_spherical’),
+40(4, 2, ’secondary_astig_0’),
+41(4, 4, ’quadrafoil_x’),
+42(5, -1, ’secondary_coma_y’),
+43]
+44
+45
+46def make_grid(n: int = 64):
+47# Build a normalized coordinate grid over [-1, 1] x [-1, 1].
+48x = np.linspace(-1.0, 1.0, n)
+49y = np.linspace(-1.0, 1.0, n)
+50xx, yy = np.meshgrid(x, y)
+51rr = np.sqrt(xx**2 + yy**2)
+52th = np.arctan2(yy, xx)
+53pupil = rr <= 1.0
+54return xx, yy, rr, th, pupil
+55
+56
+57def zernike_radial(n: int, m: int, r: np.ndarray) -> np.ndarray:
+58# Compute the radial part of a Zernike polynomial.
+59m = abs(m)
+60if (n - m) % 2 != 0:
+61return np.zeros_like(r)
+62out = np.zeros_like(r)
+63for k in range((n - m) // 2 + 1):
+64coeff = ((-1) ** k) * math.factorial(n - k)
+65denom = (
+66math.factorial(k)
+67* math.factorial((n + m) // 2 - k)
+68* math.factorial((n - m) // 2 - k)
+69)
+70out += coeff / denom * r ** (n - 2 * k)
+71return out
+72
+73
+74def zernike(n: int, m: int, r: np.ndarray, theta: np.ndarray) -> np.ndarray:
+75# Combine radial and angular parts and normalize inside the pupil.
+76rad = zernike_radial(n, m, r)
+77if m > 0:
+78z = rad * np.cos(m * theta)
+79elif m < 0:
+80z = rad * np.sin(abs(m) * theta)
+81else:
+82z = rad
+83mask = r <= 1.0
+84z = z * mask
+85std = z[mask].std()
+86if std > 1e-8:
+87z = z / std
+88return z.astype(np.float32)
+89
+90
+91@dataclass
+92class ForwardModelConfig:
+93# Image size and surrogate forward-model distortion parameters.
+94image_size: int = 64
+12
+95coeff_std: float = 0.18
+96warp_scale: float = 0.055
+97blur_scale: float = 1.20
+98shading_scale: float = 0.10
+99noise_std: float = 0.005
+100target_order: int = 10
+101target_wx: float = 0.43
+102target_wy: float = 0.25
+103
+104
+105class FlatTopZernikeSimulator:
+106"""
+107Demo surrogate model.
+108It starts from an ideal flat-top target image and uses Zernike coefficients
+109to induce physically motivated warp/blur/shading distortions.
+110
+111In your real system, replace simulate() with either:
+1121) your full Fourier-optics + SLM forward model, or
+1132) real CCD measurements collected under known Zernike settings.
+114"""
+115def __init__(self, cfg: ForwardModelConfig):
+116self.cfg = cfg
+117self.xx, self.yy, self.rr, self.th, self.pupil = make_grid(cfg.image_size)
+118self.target = self._make_target()
+119self.basis = self._build_basis()
+120# Precompute spatial gradients for later warp-field construction.
+121self.basis_dx = np.stack([np.gradient(b, axis=1) for b in self.basis], axis=0)
+122self.basis_dy = np.stack([np.gradient(b, axis=0) for b in self.basis], axis=0)
+123
+124def _make_target(self):
+125# Build an ideal flat-top target using a high-order super-Gaussian.
+126wx, wy, p = self.cfg.target_wx, self.cfg.target_wy, self.cfg.target_order
+127tgt = np.exp(-((np.abs(self.xx) / wx) ** p + (np.abs(self.yy) / wy) ** p))
+128return (tgt / tgt.max()).astype(np.float32)
+129
+130def _build_basis(self):
+131return np.stack([zernike(n, m, self.rr, self.th) for n, m, _ in ZERNIKE_MODES], axis=0)
+132
+133def simulate(self, coeffs: np.ndarray, add_noise: bool = True):
+134# Project the 15D coefficient vector onto the Zernike basis.
+135coeffs = np.asarray(coeffs, dtype=np.float32)
+136wavefront = np.tensordot(coeffs, self.basis, axes=(0, 0))
+137dx = np.tensordot(coeffs, self.basis_dx, axes=(0, 0))
+138dy = np.tensordot(coeffs, self.basis_dy, axes=(0, 0))
+139
+140# Use wavefront gradients to create spatial warping in the image.
+141xw = self.xx + self.cfg.warp_scale * dx
+142yw = self.yy + self.cfg.warp_scale * dy
+143px = (xw + 1.0) * 0.5 * (self.cfg.image_size - 1)
+144py = (yw + 1.0) * 0.5 * (self.cfg.image_size - 1)
+145warped = map_coordinates(self.target, [py, px], order=1, mode=’constant’, cval=0.0)
+146
+147# Set blur strength from coefficient RMS to mimic defocus/high-order blur.
+148blur_sigma = self.cfg.blur_scale * float(np.sqrt(np.mean(coeffs**2)))
+149if blur_sigma > 1e-6:
+150warped = gaussian_filter(warped, sigma=blur_sigma)
+151
+152# Use the Laplacian to create a local shading modulation term.
+153shading = 1.0 + self.cfg.shading_scale * laplace(wavefront)
+13
+154shading = np.clip(shading, 0.75, 1.25)
+155image = np.clip(warped * shading, 0.0, None)
+156image = image / (image.max() + 1e-8)
+157
+158# Add sensor noise so the synthetic image better resembles CCD data.
+159if add_noise:
+160image = image + np.random.normal(0.0, self.cfg.noise_std, size=image.shape).astype(
+np.float32)
+161image = np.clip(image, 0.0, 1.0)
+162return image.astype(np.float32)
+163
+164def flatness_metric(self, image: np.ndarray, roi_level: float = 0.8) -> float:
+165# Compute relative standard deviation over the flat-top ROI as a flatness metric.
+166mask = self.target > roi_level
+167region = image[mask]
+168return float(region.std() / (region.mean() + 1e-8))
+169
+170
+171class ZernikeDataset(Dataset):
+172def __init__(self, simulator: FlatTopZernikeSimulator, num_samples: int = 1000):
+173self.sim = simulator
+174self.num_modes = len(ZERNIKE_MODES)
+175# Randomly sample coefficient vectors and synthesize one image per sample.
+176self.coeffs = np.random.normal(0.0, self.sim.cfg.coeff_std, size=(num_samples, self.
+num_modes)).astype(np.float32)
+177self.images = np.stack([self.sim.simulate(c, add_noise=True) for c in self.coeffs], axis
+=0)[:, None, :, :]
+178
+179def __len__(self):
+180return len(self.coeffs)
+181
+182def __getitem__(self, idx):
+183return torch.from_numpy(self.images[idx]), torch.from_numpy(self.coeffs[idx])
+184
+185
+186class ConvBlock(nn.Module):
+187def __init__(self, c_in, c_out):
+188super().__init__()
+189self.net = nn.Sequential(
+190nn.Conv2d(c_in, c_out, 3, padding=1),
+191nn.BatchNorm2d(c_out),
+192nn.ReLU(inplace=True),
+193nn.Conv2d(c_out, c_out, 3, padding=1),
+194nn.BatchNorm2d(c_out),
+195nn.ReLU(inplace=True),
+196)
+197
+198def forward(self, x):
+199return self.net(x)
+200
+201
+202class ZernikeRegressor(nn.Module):
+203def __init__(self, num_modes: int):
+204super().__init__()
+205# Four-layer convolutional backbone followed by a 15-value regression head.
+206self.features = nn.Sequential(
+207ConvBlock(1, 16),
+208nn.MaxPool2d(2),
+209ConvBlock(16, 32),
+14
+210nn.MaxPool2d(2),
+211ConvBlock(32, 64),
+212nn.MaxPool2d(2),
+213ConvBlock(64, 128),
+214nn.AdaptiveAvgPool2d((1, 1)),
+215)
+216self.head = nn.Sequential(
+217nn.Flatten(),
+218nn.Linear(128, 128),
+219nn.ReLU(inplace=True),
+220nn.Dropout(0.15),
+221nn.Linear(128, num_modes),
+222)
+223
+224def forward(self, x):
+225return self.head(self.features(x))
+226
+227
+228def run_epoch(model, loader, criterion, optimizer=None):
+229training = optimizer is not None
+230model.train(training)
+231total_loss = 0.0
+232total_mae = 0.0
+233total_n = 0
+234
+235for x, y in loader:
+236x = x.to(DEVICE)
+237y = y.to(DEVICE)
+238pred = model(x)
+239loss = criterion(pred, y)
+240if training:
+241optimizer.zero_grad()
+242loss.backward()
+243optimizer.step()
+244mae = (pred - y).abs().mean().item()
+245bs = x.size(0)
+246total_loss += loss.item() * bs
+247total_mae += mae * bs
+248total_n += bs
+249return total_loss / total_n, total_mae / total_n
+250
+251
+252def train_model(model, train_loader, val_loader, epochs=5, lr=1e-3):
+253criterion = nn.SmoothL1Loss()
+254optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+255scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+256
+257history = {’train_loss’: [], ’val_loss’: [], ’train_mae’: [], ’val_mae’: []}
+258best_state = None
+259best_val = float(’inf’)
+260
+261for ep in range(1, epochs + 1):
+262train_loss, train_mae = run_epoch(model, train_loader, criterion, optimizer)
+263val_loss, val_mae = run_epoch(model, val_loader, criterion, optimizer=None)
+264scheduler.step()
+265history[’train_loss’].append(train_loss)
+266history[’val_loss’].append(val_loss)
+267history[’train_mae’].append(train_mae)
+268history[’val_mae’].append(val_mae)
+15
+269print(f’Epoch {ep:02d}/{epochs} | train loss={train_loss:.5f}, val loss={val_loss:.5f},
+train mae={train_mae:.5f}, val mae={val_mae:.5f}’)
+270if val_loss < best_val:
+271best_val = val_loss
+272best_state = {k: v.cpu().clone() for k, v in model.state_dict().items()}
+273if best_state is not None:
+274model.load_state_dict(best_state)
+275return history
+276
+277
+278def predict_coeffs(model: nn.Module, image: np.ndarray):
+279# Run inference on one image and return the 15 predicted coefficients.
+280model.eval()
+281with torch.no_grad():
+282x = torch.from_numpy(image[None, None, :, :]).float().to(DEVICE)
+283pred = model(x).cpu().numpy()[0]
+284return pred.astype(np.float32)
+285
+286
+287def run_adaptive_loop(sim: FlatTopZernikeSimulator, model: nn.Module, true_coeffs: np.ndarray,
+steps: int = 8, gain: float = 0.85):
+288# Closed-loop correction: repeatedly estimate residual aberration and update compensation.
+289correction = np.zeros_like(true_coeffs, dtype=np.float32)
+290images = []
+291residual_norms = []
+292flatness = []
+293predicted = []
+294
+295for _ in range(steps):
+296residual = true_coeffs + correction
+297image = sim.simulate(residual, add_noise=False)
+298pred = predict_coeffs(model, image)
+299correction = correction - gain * pred
+300images.append(image)
+301residual_norms.append(float(np.sqrt(np.mean(residual**2))))
+302flatness.append(sim.flatness_metric(image))
+303predicted.append(pred)
+304
+305final_residual = true_coeffs + correction
+306final_image = sim.simulate(final_residual, add_noise=False)
+307images.append(final_image)
+308residual_norms.append(float(np.sqrt(np.mean(final_residual**2))))
+309flatness.append(sim.flatness_metric(final_image))
+310
+311return {
+312’images’: images,
+313’residual_norms’: residual_norms,
+314’flatness’: flatness,
+315’predicted’: predicted,
+316’final_residual’: final_residual,
+317’final_correction’: correction,
+318}
+319
+320
+321def plot_training(history, outdir):
+322plt.figure(figsize=(7, 4))
+323plt.plot(history[’train_loss’], label=’train loss’)
+324plt.plot(history[’val_loss’], label=’val loss’)
+325plt.xlabel(’epoch’)
+16
+326plt.ylabel(’SmoothL1 loss’)
+327plt.legend()
+328plt.tight_layout()
+329plt.savefig(os.path.join(outdir, ’training_curve.png’), dpi=180)
+330plt.close()
+331
+332
+333def plot_prediction_example(sim, model, dataset, outdir):
+334idx = np.random.randint(len(dataset))
+335image = dataset.images[idx, 0]
+336true_coeffs = dataset.coeffs[idx]
+337pred_coeffs = predict_coeffs(model, image)
+338
+339fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+340axes[0].imshow(sim.target, cmap=’inferno’)
+341axes[0].set_title(’ideal flat-top target’)
+342axes[1].imshow(image, cmap=’inferno’)
+343axes[1].set_title(’input distorted image’)
+344axes[2].bar(np.arange(len(true_coeffs)), np.abs(true_coeffs - pred_coeffs))
+345axes[2].set_title(’|prediction error| by mode’)
+346axes[2].set_xlabel(’mode index’)
+347for ax in axes[:2]:
+348ax.axis(’off’)
+349plt.tight_layout()
+350plt.savefig(os.path.join(outdir, ’prediction_example.png’), dpi=180)
+351plt.close()
+352
+353
+354def plot_adaptive_result(sim, result, outdir):
+355initial = result[’images’][0]
+356final = result[’images’][-1]
+357steps = np.arange(len(result[’residual_norms’]))
+358
+359fig, axes = plt.subplots(2, 3, figsize=(12, 8))
+360axes[0, 0].imshow(sim.target, cmap=’inferno’)
+361axes[0, 0].set_title(’ideal target’)
+362axes[0, 1].imshow(initial, cmap=’inferno’)
+363axes[0, 1].set_title(f’before correction\nflatness={result["flatness"][0]*100:.2f}%’)
+364axes[0, 2].imshow(final, cmap=’inferno’)
+365axes[0, 2].set_title(f’after correction\nflatness={result["flatness"][-1]*100:.2f}%’)
+366axes[1, 0].plot(steps, result[’residual_norms’], marker=’o’)
+367axes[1, 0].set_title(’residual coefficient RMS’)
+368axes[1, 0].set_xlabel(’iteration’)
+369axes[1, 1].plot(steps, np.array(result[’flatness’]) * 100.0, marker=’o’)
+370axes[1, 1].set_title(’flatness non-uniformity (%)’)
+371axes[1, 1].set_xlabel(’iteration’)
+372axes[1, 2].bar(np.arange(len(result[’final_residual’])), result[’final_residual’])
+373axes[1, 2].set_title(’final residual coefficients’)
+374axes[1, 2].set_xlabel(’mode index’)
+375for ax in axes[0]:
+376ax.axis(’off’)
+377plt.tight_layout()
+378plt.savefig(os.path.join(outdir, ’adaptive_correction.png’), dpi=180)
+379plt.close()
+380
+381
+382def main():
+383# Use a relative output directory so results stay inside the workspace.
+384outdir = ’demo_outputs’
+17
+385os.makedirs(outdir, exist_ok=True)
+386
+387cfg = ForwardModelConfig()
+388sim = FlatTopZernikeSimulator(cfg)
+389dataset = ZernikeDataset(sim, num_samples=800)
+390
+391n_train = int(0.8 * len(dataset))
+392n_val = len(dataset) - n_train
+393train_set, val_set = random_split(dataset, [n_train, n_val], generator=torch.Generator().
+manual_seed(SEED))
+394train_loader = DataLoader(train_set, batch_size=64, shuffle=True, num_workers=0)
+395val_loader = DataLoader(val_set, batch_size=64, shuffle=False, num_workers=0)
+396
+397model = ZernikeRegressor(num_modes=len(ZERNIKE_MODES)).to(DEVICE)
+398print(f’Training on device: {DEVICE}’)
+399history = train_model(model, train_loader, val_loader, epochs=5, lr=1e-3)
+400
+401torch.save({
+402’model_state’: model.state_dict(),
+403’mode_names’: [name for _, _, name in ZERNIKE_MODES],
+404’config’: cfg.__dict__,
+405}, os.path.join(outdir, ’zernike_cnn_model.pt’))
+406
+407plot_training(history, outdir)
+408plot_prediction_example(sim, model, dataset, outdir)
+409
+410true_coeffs = np.random.normal(0.0, cfg.coeff_std, size=len(ZERNIKE_MODES)).astype(np.
+float32)
+411result = run_adaptive_loop(sim, model, true_coeffs, steps=8, gain=0.85)
+412plot_adaptive_result(sim, result, outdir)
+413
+414print(’\nMode list:’)
+415for i, (_, _, name) in enumerate(ZERNIKE_MODES):
+416print(f’{i:2d}: {name}’)
+417print(’\nTrue coefficients:’)
+418print(np.round(true_coeffs, 4))
+419print(’\nFinal residual coefficients:’)
+420print(np.round(result[’final_residual’], 4))
+421print(f"\nInitial flatness non-uniformity: {result[’flatness’][0]*100:.2f}%")
+422print(f"Final flatness non-uniformity: {result[’flatness’][-1]*100:.2f}%")
+423print(f’\nOutputs saved to: {outdir}’)
+424
+425
+426if __name__ == ’__main__’:
+427main()
+18
