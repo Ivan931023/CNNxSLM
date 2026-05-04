@@ -12,20 +12,20 @@ __pycache__/
 # Large data files
 *.mat
 *.pth
+*.pt
 *.h5
 *.hdf5
 
 # Datasets (too large for git)
-Simulated_flattop/dataset/
-Simulated_flattop/dataset_finetune/
+data/dataset/
+data/dataset_finetune/
 
 # Logs
-*.log
+logs/
+
+# Archive (reference only, not tracked)
+archive/
 
 # Temporary Office files
 .~*
-
-# Output images (optional, uncomment if you want to track them)
-# simulation_outputs/
-# Simulated_flattop/flattop_cnn_outputs/
-other/
+data/
