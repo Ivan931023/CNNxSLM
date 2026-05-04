@@ -97,10 +97,12 @@ def run_epoch(model, loader, criterion, optimizer=None):
     return total_loss / total_n, total_mae / total_n
 
 def main():
-    dataset_dir = 'dataset'
+    dataset_dir = '../data/dataset'
     csv_file = os.path.join(dataset_dir, 'labels.csv')
-    outdir = 'flattop_cnn_outputs'
+    outdir = '../outputs/models'
+    img_outdir = '../outputs/images'
     os.makedirs(outdir, exist_ok=True)
+    os.makedirs(img_outdir, exist_ok=True)
     
     if not os.path.exists(csv_file):
         print(f"Error: {csv_file} not found. Please run dataset_generator.py first to generate data.")
@@ -184,8 +186,8 @@ def main():
     plt.legend()
     
     plt.tight_layout()
-    plt.savefig(os.path.join(outdir, 'training_curve.png'), dpi=150)
-    print(f"Training curves saved to {outdir}/training_curve.png")
+    plt.savefig(os.path.join(img_outdir, 'training_curve.png'), dpi=150)
+    print(f"Training curves saved to {img_outdir}/training_curve.png")
 
 if __name__ == '__main__':
     main()

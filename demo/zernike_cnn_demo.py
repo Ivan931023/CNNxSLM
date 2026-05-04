@@ -344,7 +344,7 @@ def plot_adaptive_result(sim, result, outdir):
     plt.close()
 
 def main():
-    outdir = 'demo_outputs'
+    outdir = '../outputs/demo'
     os.makedirs(outdir, exist_ok=True)
 
     cfg = ForwardModelConfig()

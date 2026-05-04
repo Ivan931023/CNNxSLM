@@ -19,11 +19,11 @@ def IDFT(u):
 
 def main():
     print("Loading tensors.mat...")
-    if not os.path.exists('tensors.mat'):
+    if not os.path.exists('../data/tensors.mat'):
         print("tensors.mat not found! Run export_static_tensors.m in MATLAB first.")
         return
         
-    mat = h5py.File('tensors.mat', 'r')
+    mat = h5py.File('../data/tensors.mat', 'r')
     
     device = get_device()
     print(f"Using device: {device}")
@@ -55,8 +55,8 @@ def main():
     num_samples = 20100  # 100 perfect + 20000 fine-tuning
     batch_size = 1
 
-    os.makedirs('dataset_finetune', exist_ok=True)
-    csv_file = open('dataset_finetune/labels.csv', 'w', newline='')
+    os.makedirs('../data/dataset_finetune', exist_ok=True)
+    csv_file = open('../data/dataset_finetune/labels.csv', 'w', newline='')
     writer = csv.writer(csv_file)
     headers = ['filename'] + [f'Z{i+1}' for i in range(15)]
     writer.writerow(headers)
@@ -116,7 +116,7 @@ def main():
             img_norm = (img / np.max(img) * 255).astype(np.uint8)
             
             filename = f"sample_{sample_idx:05d}.png"
-            plt.imsave(os.path.join('dataset_finetune', filename), img_norm, cmap='turbo')
+            plt.imsave(os.path.join('../data/dataset_finetune', filename), img_norm, cmap='turbo')
             
             writer.writerow([filename] + z_vals.tolist())
             sample_idx += 1

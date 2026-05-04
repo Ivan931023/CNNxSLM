@@ -95,7 +95,7 @@ def main():
     c = pixel // 2
     data_zoomin = image[c - range_val : c + range_val + 1, c - range_val : c + range_val + 1]
     
-    outdir = 'simulation_outputs'
+    outdir = '../outputs/simulation'
     os.makedirs(outdir, exist_ok=True)
     
     print("Saving plots...")
