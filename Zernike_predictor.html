@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zernike Flattop Beam Analyzer</title>
+    
+    <!-- ONNX Runtime Web -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --primary: #38bdf8;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        body {
+            margin: 0;
+            padding: 2rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-color);
+            background-image: 
+                radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin: 0;
+            background: linear-gradient(to right, #38bdf8, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            color: var(--text-muted);
+            margin-top: 0.5rem;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 2rem;
+            width: 100%;
+            max-width: 1200px;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        }
+
+        .panel-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-top: 0;
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.75rem;
+        }
+
+        .upload-area {
+            display: block;
+            position: relative;
+            border: 2px dashed rgba(56, 189, 248, 0.35);
+            border-radius: 14px;
+            padding: 2.25rem 1.25rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.04), rgba(139, 92, 246, 0.04));
+            overflow: hidden;
+            box-sizing: border-box;
+        }
+
+        .upload-area::before {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 50% 0%, rgba(56, 189, 248, 0.12), transparent 60%);
+            opacity: 0;
+            transition: opacity 0.25s ease;
+            pointer-events: none;
+        }
+
+        .upload-area:hover {
+            border-color: var(--primary);
+            transform: translateY(-1px);
+            box-shadow: 0 8px 24px -12px rgba(56, 189, 248, 0.4);
+        }
+
+        .upload-area:hover::before { opacity: 1; }
+
+        .upload-area.dragover {
+            border-color: var(--primary);
+            border-style: solid;
+            background: rgba(56, 189, 248, 0.08);
+        }
+
+        .upload-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 56px;
+            height: 56px;
+            border-radius: 14px;
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(139, 92, 246, 0.18));
+            font-size: 1.75rem;
+            margin-bottom: 0.75rem;
+            transition: transform 0.25s ease;
+        }
+
+        .upload-area:hover .upload-icon { transform: scale(1.06) rotate(-3deg); }
+
+        .upload-area input { display: none; }
+
+        .upload-title {
+            font-weight: 600;
+            font-size: 0.95rem;
+            letter-spacing: 0.01em;
+        }
+
+        .upload-hint {
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            margin-top: 0.35rem;
+            letter-spacing: 0.02em;
+        }
+
+        .preview-wrapper {
+            display: none;
+            margin-top: 1rem;
+            border-radius: 12px;
+            padding: 0.5rem;
+            background: rgba(0, 0, 0, 0.25);
+            border: 1px solid var(--border);
+        }
+
+        .preview-wrapper.visible { display: block; }
+
+        .image-preview {
+            width: 100%;
+            border-radius: 8px;
+            display: block;
+        }
+
+        .preview-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            padding: 0.5rem 0.25rem 0.25rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+
+        .model-pill {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.85rem;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid var(--border);
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+            box-sizing: border-box;
+        }
+
+        .model-pill .dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #fbbf24;
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+            transition: all 0.3s ease;
+        }
+
+        .model-pill.ready .dot { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.6); }
+        .model-pill.error .dot { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+        .model-pill.loading .dot { animation: pulse 1.2s ease-in-out infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        #chart-container {
+            position: relative;
+            height: 400px;
+            width: 100%;
+        }
+
+        .status {
+            margin-top: 1rem;
+            padding: 0.85rem 1rem;
+            border-radius: 10px;
+            background: rgba(0,0,0,0.28);
+            border: 1px solid var(--border);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.82rem;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            min-height: 1.5rem;
+        }
+
+        .loading {
+            flex-shrink: 0;
+            width: 14px;
+            height: 14px;
+            border: 2px solid rgba(255,255,255,.2);
+            border-radius: 50%;
+            border-top-color: var(--primary);
+            animation: spin 0.8s linear infinite;
+            display: none;
+        }
+
+        .loading.active { display: inline-block; }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            background: rgba(56, 189, 248, 0.2);
+            color: var(--primary);
+            margin-bottom: 1rem;
+        }
+
+        #model-upload-group {
+            display: none;
+            margin-top: 1rem;
+            padding: 0.9rem;
+            background: rgba(251, 191, 36, 0.06);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            border-radius: 10px;
+        }
+
+        #model-upload-group p {
+            margin: 0 0 0.6rem 0;
+            font-size: 0.78rem;
+            color: #fbbf24;
+            line-height: 1.5;
+        }
+
+        #model-upload-group code {
+            background: rgba(0,0,0,0.3);
+            padding: 0.1rem 0.35rem;
+            border-radius: 4px;
+            font-size: 0.75rem;
+        }
+
+        #model-upload {
+            font-size: 0.75rem;
+            width: 100%;
+            color: var(--text-muted);
+        }
+
+        .btn {
+            background: linear-gradient(135deg, var(--primary), #8b5cf6);
+            color: #fff;
+            border: none;
+            padding: 0.65rem 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            width: 100%;
+            margin-top: 0.5rem;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 18px -8px rgba(56, 189, 248, 0.6);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="badge">Serverless Web AI</div>
+        <h1>Zernike Flattop Analyzer</h1>
+        <p>Hyper-Precision ONNX Edge Inference (ResNet-34)</p>
+    </div>
+
+    <div class="container">
+        <!-- Left Panel: Input -->
+        <div class="panel">
+            <h2 class="panel-title">Input Image</h2>
+
+            <div class="model-pill" id="model-pill">
+                <span class="dot"></span>
+                <span id="model-pill-text">Initializing model…</span>
+            </div>
+
+            <label class="upload-area" id="upload-label">
+                <input type="file" id="image-upload" accept="image/*">
+                <div class="upload-icon">📸</div>
+                <div class="upload-title">Click or drop a flattop beam image</div>
+                <div class="upload-hint">PNG · JPG · up to 5 MB · 500×500 recommended</div>
+            </label>
+
+            <div class="preview-wrapper" id="preview-wrapper">
+                <img id="image-preview" class="image-preview" alt="Preview">
+                <div class="preview-meta">
+                    <span id="preview-name">—</span>
+                    <span id="preview-size">—</span>
+                </div>
+            </div>
+
+            <div id="model-upload-group">
+                <p>⚠️ 無法自動載入模型（file:// 限制）。請改用 <b>launch.command</b> 雙擊啟動，或手動選擇 <code>outputs/models/zernike_resnet_single.onnx</code>：</p>
+                <input type="file" id="model-upload" accept=".onnx">
+            </div>
+
+            <div class="status" id="status-box">
+                <span class="loading" id="loading-spinner"></span>
+                <span id="status-text">Ready. Waiting for model...</span>
+            </div>
+        </div>
+
+        <!-- Right Panel: Output -->
+        <div class="panel">
+            <h2 class="panel-title">Predicted Zernike Aberrations</h2>
+            <div id="chart-container">
+                <canvas id="zernikeChart"></canvas>
+            </div>
+            <div id="rms-feedback" style="margin-top: 1.5rem; font-size: 1.1rem; text-align: center; font-weight: 500;"></div>
+        </div>
+    </div>
+
+    <!-- Hidden canvas for image processing -->
+    <canvas id="process-canvas" width="500" height="500" style="display: none;"></canvas>
+
+    <script>
+        const ZERNIKE_NAMES = [
+            "Z2: Tilt Y", "Z3: Tilt X", "Z4: Astig 45°", "Z5: Defocus",
+            "Z6: Astig 0°", "Z7: Trefoil Y", "Z8: Coma Y", "Z9: Coma X",
+            "Z10: Trefoil X", "Z11: Quad Y", "Z12: Sec. Astig 45°", "Z13: Spherical",
+            "Z14: Sec. Astig 0°", "Z15: Quad X"
+        ];
+
+        let session = null;
+        let chart = null;
+
+        const statusText = document.getElementById('status-text');
+        const loadingSpinner = document.getElementById('loading-spinner');
+        const imageUpload = document.getElementById('image-upload');
+        const imagePreview = document.getElementById('image-preview');
+        const previewWrapper = document.getElementById('preview-wrapper');
+        const previewName = document.getElementById('preview-name');
+        const previewSize = document.getElementById('preview-size');
+        const processCanvas = document.getElementById('process-canvas');
+        const rmsFeedback = document.getElementById('rms-feedback');
+        const modelUploadGroup = document.getElementById('model-upload-group');
+        const modelUpload = document.getElementById('model-upload');
+        const uploadLabel = document.getElementById('upload-label');
+        const modelPill = document.getElementById('model-pill');
+        const modelPillText = document.getElementById('model-pill-text');
+
+        function setStatus(msg, loading = false) {
+            statusText.textContent = msg;
+            loadingSpinner.classList.toggle('active', loading);
+        }
+
+        function setModelState(state, label) {
+            modelPill.classList.remove('ready', 'error', 'loading');
+            if (state) modelPill.classList.add(state);
+            modelPillText.textContent = label;
+        }
+
+        function formatBytes(bytes) {
+            if (bytes < 1024) return bytes + ' B';
+            if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+            return (bytes / (1024 * 1024)).toFixed(2) + ' MB';
+        }
+
+        // Initialize Chart.js
+        function initChart() {
+            const ctx = document.getElementById('zernikeChart').getContext('2d');
+            Chart.defaults.color = '#94a3b8';
+            chart = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: ZERNIKE_NAMES,
+                    datasets: [{
+                        label: 'Coefficient Magnitude',
+                        data: Array(14).fill(0),
+                        backgroundColor: '#38bdf8',
+                        borderRadius: 4
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { display: false }
+                    },
+                    scales: {
+                        y: {
+                            grid: { color: 'rgba(255,255,255,0.1)' }
+                        },
+                        x: {
+                            grid: { display: false },
+                            ticks: { maxRotation: 45, minRotation: 45 }
+                        }
+                    }
+                }
+            });
+        }
+
+        // Load Model
+        async function loadModel(modelSource) {
+            try {
+                setStatus('Loading ONNX model...', true);
+                setModelState('loading', 'Loading model…');
+
+                // Use WASM backend (Single thread to avoid SharedArrayBuffer CORS issues)
+                ort.env.wasm.numThreads = 1;
+
+                if (typeof modelSource === 'string') {
+                    // Pass URL directly so ort.js can resolve external .data files
+                    session = await ort.InferenceSession.create(modelSource, { executionProviders: ['wasm'] });
+                } else {
+                    // Load from File object (single-file model, no external data)
+                    const modelBuffer = await modelSource.arrayBuffer();
+                    session = await ort.InferenceSession.create(modelBuffer, { executionProviders: ['wasm'] });
+                }
+
+                setStatus('Model loaded! Upload an image to begin.');
+                setModelState('ready', 'ResNet-34 ready · ONNX runtime');
+                modelUploadGroup.style.display = 'none';
+
+            } catch (err) {
+                console.error(err);
+                setStatus('⚠️ Cannot auto-load model (file:// restriction). Please upload the model file manually.');
+                setModelState('error', 'Model not loaded');
+                modelUploadGroup.style.display = 'block';
+            }
+        }
+
+        // Manual Model Upload
+        modelUpload.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                loadModel(e.target.files[0]);
+            }
+        });
+
+        // Handle Image Upload & Inference
+        function handleImageFile(file) {
+            if (!file || !file.type.startsWith('image/')) return;
+
+            previewName.textContent = file.name;
+            previewSize.textContent = formatBytes(file.size);
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                imagePreview.src = event.target.result;
+                previewWrapper.classList.add('visible');
+
+                const img = new Image();
+                img.onload = () => runInference(img);
+                img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+        }
+
+        imageUpload.addEventListener('change', (e) => handleImageFile(e.target.files[0]));
+
+        // Drag and drop support
+        ['dragenter', 'dragover'].forEach(evt => {
+            uploadLabel.addEventListener(evt, (e) => {
+                e.preventDefault();
+                uploadLabel.classList.add('dragover');
+            });
+        });
+        ['dragleave', 'drop'].forEach(evt => {
+            uploadLabel.addEventListener(evt, (e) => {
+                e.preventDefault();
+                uploadLabel.classList.remove('dragover');
+            });
+        });
+        uploadLabel.addEventListener('drop', (e) => {
+            const file = e.dataTransfer.files[0];
+            if (file) handleImageFile(file);
+        });
+
+        async function runInference(img) {
+            if (!session) {
+                setStatus('Please wait or load the model first.', false);
+                return;
+            }
+
+            setStatus('Processing image & running inference...', true);
+
+            // 1. Draw image to 500x500 canvas
+            //    Disable smoothing to match PIL's nearest-neighbor when sizes match,
+            //    or use it consistently. For 500x500 source -> 500x500 canvas it's a 1:1 copy.
+            const ctx = processCanvas.getContext('2d', { willReadFrequently: true });
+            ctx.imageSmoothingEnabled = false;
+            ctx.clearRect(0, 0, 500, 500);
+            ctx.drawImage(img, 0, 0, 500, 500);
+
+            // 2. Extract pixel data and convert to grayscale Float32Array [1, 1, 500, 500]
+            const imgData = ctx.getImageData(0, 0, 500, 500);
+            const pixels = imgData.data;
+            const floatData = new Float32Array(500 * 500);
+
+            // Match PIL's convert('L'): integer luma, then /255
+            // PIL uses: L = (R*299 + G*587 + B*114 + 500) // 1000  (rounded)
+            let inMin = 1, inMax = 0, inSum = 0;
+            for (let i = 0; i < 500 * 500; i++) {
+                const r = pixels[i * 4];
+                const g = pixels[i * 4 + 1];
+                const b = pixels[i * 4 + 2];
+                const lum = Math.floor((r * 299 + g * 587 + b * 114 + 500) / 1000);
+                const gray = lum / 255.0;
+                floatData[i] = gray;
+                if (gray < inMin) inMin = gray;
+                if (gray > inMax) inMax = gray;
+                inSum += gray;
+            }
+            const inMean = inSum / (500 * 500);
+            console.log(`[Input] src=${img.naturalWidth}x${img.naturalHeight} | min=${inMin.toFixed(4)} max=${inMax.toFixed(4)} mean=${inMean.toFixed(4)}`);
+
+            // 3. Create ORT Tensor
+            const tensor = new ort.Tensor('float32', floatData, [1, 1, 500, 500]);
+
+            // 4. Run Model
+            try {
+                const feeds = {};
+                feeds[session.inputNames[0]] = tensor;
+                
+                const start = performance.now();
+                const results = await session.run(feeds);
+                const end = performance.now();
+                
+                const output = results[session.outputNames[0]].data;
+                console.log('[Output]', Array.from(output).map(v => v.toFixed(4)));
+
+                updateChart(output);
+                setStatus(`Inference complete in ${(end - start).toFixed(1)} ms.\nInput stats: min=${inMin.toFixed(3)} max=${inMax.toFixed(3)} mean=${inMean.toFixed(3)} | src=${img.naturalWidth}×${img.naturalHeight}`);
+                
+            } catch (err) {
+                console.error(err);
+                setStatus(`Inference failed: ${err.message}`);
+            }
+        }
+
+        function updateChart(preds) {
+            // Update chart data
+            const colors = Array.from(preds).map(v => v < 0 ? '#ef4444' : '#10b981');
+            chart.data.datasets[0].data = Array.from(preds);
+            chart.data.datasets[0].backgroundColor = colors;
+            chart.update();
+
+            // Calculate RMS
+            let sumSq = 0;
+            let maxIdx = 0;
+            let maxVal = -1;
+            for(let i=0; i<preds.length; i++) {
+                sumSq += preds[i] * preds[i];
+                if(Math.abs(preds[i]) > maxVal) {
+                    maxVal = Math.abs(preds[i]);
+                    maxIdx = i;
+                }
+            }
+            const rms = Math.sqrt(sumSq / preds.length);
+
+            if (rms < 0.2) {
+                rmsFeedback.innerHTML = `✅ <span style="color:#10b981">The beam is relatively flat! (RMS Aberration: ${rms.toFixed(4)})</span>`;
+            } else {
+                rmsFeedback.innerHTML = `⚠️ <span style="color:#fbbf24">High aberration detected! (RMS Aberration: ${rms.toFixed(4)})<br>Most significant mode: <b>${ZERNIKE_NAMES[maxIdx]}</b></span>`;
+            }
+        }
+
+        // Boot up
+        initChart();
+        // Try to load default relative path
+        loadModel('outputs/models/zernike_resnet.onnx');
+
+    </script>
+</body>
+</html>

@@ -28,7 +28,7 @@ class ZernikeResNet(nn.Module):
 def load_model():
     device = torch.device('cuda' if torch.cuda.is_available() else 'mps' if torch.backends.mps.is_available() else 'cpu')
     model = ZernikeResNet(num_predict_modes=14).to(device)
-    model_path = os.path.join('flattop_cnn_outputs', 'best_resnet_finetuned.pth')
+    model_path = os.path.join('outputs', 'models', 'best_resnet_finetuned.pth')
     
     if os.path.exists(model_path):
         model.load_state_dict(torch.load(model_path, map_location=device))
@@ -55,7 +55,7 @@ st.markdown("Upload a distorted flattop beam image to instantly analyze its Zern
 model, device = load_model()
 
 if model is None:
-    st.error("⚠️ Model weights not found! Please make sure `flattop_cnn_outputs/best_resnet_finetuned.pth` exists. Has the hyper-precision training completed yet?")
+    st.error("⚠️ Model weights not found! Please make sure `outputs/models/best_resnet_finetuned.pth` exists. Has the hyper-precision training completed yet?")
 else:
     st.success(f"Hyper-Precision Model (ResNet-34, 500×500) loaded on **{device.type.upper()}** hardware acceleration.")
 

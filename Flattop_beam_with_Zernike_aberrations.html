@@ -1,0 +1,557 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Flattop Beam Generator · Zernike Aberrations</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --primary: #38bdf8;
+            --secondary: #8b5cf6;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 2rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-color);
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header { text-align: center; margin-bottom: 2rem; }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin: 0;
+            background: linear-gradient(to right, #38bdf8, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p { color: var(--text-muted); margin-top: 0.5rem; }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            background: rgba(139, 92, 246, 0.2);
+            color: var(--secondary);
+            margin-bottom: 1rem;
+        }
+
+        .container {
+            display: grid;
+            grid-template-columns: 1.1fr 1fr;
+            gap: 2rem;
+            width: 100%;
+            max-width: 1400px;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .panel-title {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin: 0 0 1rem 0;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.75rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .server-pill {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 0.85rem;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid var(--border);
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            margin-bottom: 1rem;
+        }
+
+        .server-pill .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: #fbbf24;
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+        }
+
+        .server-pill.ready .dot { background: #10b981; box-shadow: 0 0 8px rgba(16, 185, 129, 0.6); }
+        .server-pill.error .dot { background: #ef4444; box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+        .server-pill.busy .dot { animation: pulse 1.2s ease-in-out infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        .z-grid {
+            display: grid;
+            gap: 0.5rem;
+            max-height: 480px;
+            overflow-y: auto;
+            padding-right: 0.5rem;
+            margin: 0 -0.25rem;
+        }
+
+        .z-grid::-webkit-scrollbar { width: 6px; }
+        .z-grid::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        .z-row {
+            display: grid;
+            grid-template-columns: 130px 1fr 70px;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.4rem 0.5rem;
+            border-radius: 8px;
+            transition: background 0.15s;
+        }
+
+        .z-row:hover { background: rgba(255, 255, 255, 0.03); }
+
+        .z-row.active { background: rgba(56, 189, 248, 0.06); }
+
+        .z-label {
+            font-size: 0.82rem;
+            font-weight: 500;
+            color: var(--text);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+
+        .z-label .mode-name {
+            color: var(--text-muted);
+            font-weight: 400;
+            font-size: 0.72rem;
+            display: block;
+            margin-top: 1px;
+        }
+
+        .z-slider {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 100%;
+            height: 4px;
+            border-radius: 2px;
+            background: rgba(255, 255, 255, 0.1);
+            outline: none;
+        }
+
+        .z-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+            border: 2px solid #0f172a;
+            box-shadow: 0 0 6px rgba(56, 189, 248, 0.5);
+            transition: transform 0.1s;
+        }
+
+        .z-slider::-webkit-slider-thumb:hover { transform: scale(1.15); }
+
+        .z-slider::-moz-range-thumb {
+            width: 16px; height: 16px;
+            border-radius: 50%;
+            background: var(--primary);
+            cursor: pointer;
+            border: 2px solid #0f172a;
+        }
+
+        .z-number {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            padding: 0.3rem 0.4rem;
+            font-size: 0.8rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            text-align: right;
+            width: 100%;
+        }
+
+        .z-number:focus {
+            outline: none;
+            border-color: var(--primary);
+        }
+
+        .actions {
+            display: flex;
+            gap: 0.6rem;
+            margin-top: 1rem;
+        }
+
+        .btn {
+            border: none;
+            padding: 0.7rem 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.9rem;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
+        }
+
+        .btn:hover { transform: translateY(-1px); }
+        .btn:active { transform: translateY(0); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff;
+            flex: 1;
+            box-shadow: 0 4px 12px -4px rgba(56, 189, 248, 0.5);
+        }
+        .btn-primary:hover:not(:disabled) {
+            box-shadow: 0 6px 18px -6px rgba(56, 189, 248, 0.7);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-secondary:hover:not(:disabled) {
+            background: rgba(255, 255, 255, 0.1);
+        }
+
+        .status {
+            margin-top: 1rem;
+            padding: 0.75rem 1rem;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid var(--border);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            min-height: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+        }
+
+        .spinner {
+            display: none;
+            width: 14px; height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+        .spinner.active { display: inline-block; }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        .preview-area {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            border-radius: 12px;
+            background: rgba(0, 0, 0, 0.4);
+            border: 1px dashed var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+        }
+
+        .preview-area img {
+            display: none;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+
+        .preview-area.has-image img { display: block; }
+        .preview-area.has-image .placeholder { display: none; }
+
+        .placeholder {
+            color: var(--text-muted);
+            text-align: center;
+            padding: 2rem;
+            font-size: 0.9rem;
+        }
+
+        .placeholder .icon { font-size: 2.5rem; display: block; margin-bottom: 0.6rem; opacity: 0.5; }
+
+        .download-row {
+            display: flex;
+            gap: 0.6rem;
+            margin-top: 1rem;
+            align-items: center;
+        }
+
+        .download-row .meta {
+            flex: 1;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+        }
+
+        @media (max-width: 900px) {
+            .container { grid-template-columns: 1fr; }
+            .z-grid { max-height: none; }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="header">
+        <div class="badge">SLM Physical Simulator</div>
+        <h1>Flattop Beam Generator</h1>
+        <p>Custom Zernike Aberrations · Fraunhofer Propagation · Turbo Colormap</p>
+    </div>
+
+    <div class="container">
+        <!-- Left Panel: Controls -->
+        <div class="panel">
+            <h2 class="panel-title">
+                <span>Zernike Coefficients</span>
+            </h2>
+
+            <div class="server-pill" id="server-pill">
+                <span class="dot"></span>
+                <span id="server-pill-text">Checking server…</span>
+            </div>
+
+            <div class="z-grid" id="z-grid"></div>
+
+            <div class="actions">
+                <button class="btn btn-secondary" id="reset-btn">Reset to 0</button>
+                <button class="btn btn-primary" id="generate-btn" disabled>⚡ Generate Image</button>
+            </div>
+
+            <div class="status" id="status-box">
+                <span class="spinner" id="spinner"></span>
+                <span id="status-text">Waiting for server…</span>
+            </div>
+        </div>
+
+        <!-- Right Panel: Output -->
+        <div class="panel">
+            <h2 class="panel-title">Generated Beam</h2>
+
+            <div class="preview-area" id="preview-area">
+                <div class="placeholder">
+                    <span class="icon">🌌</span>
+                    Set Zernike coefficients on the left,<br>then click <b>Generate</b>.
+                </div>
+                <img id="output-image" alt="Generated flattop beam">
+            </div>
+
+            <div class="download-row">
+                <span class="meta" id="image-meta">—</span>
+                <button class="btn btn-secondary" id="download-btn" disabled>⬇ Download PNG</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const Z_MODES = [
+            { id: 2,  name: 'Tilt Y' },
+            { id: 3,  name: 'Tilt X' },
+            { id: 4,  name: 'Astigmatism 45°' },
+            { id: 5,  name: 'Defocus' },
+            { id: 6,  name: 'Astigmatism 0°' },
+            { id: 7,  name: 'Trefoil Y' },
+            { id: 8,  name: 'Coma Y' },
+            { id: 9,  name: 'Coma X' },
+            { id: 10, name: 'Trefoil X' },
+            { id: 11, name: 'Quadrafoil Y' },
+            { id: 12, name: 'Sec. Astig 45°' },
+            { id: 13, name: 'Spherical' },
+            { id: 14, name: 'Sec. Astig 0°' },
+            { id: 15, name: 'Quadrafoil X' },
+        ];
+
+        const Z_RANGE = 2.0;  // slider range: -2 to +2
+        const Z_STEP = 0.01;
+
+        const grid = document.getElementById('z-grid');
+        const generateBtn = document.getElementById('generate-btn');
+        const resetBtn = document.getElementById('reset-btn');
+        const downloadBtn = document.getElementById('download-btn');
+        const previewArea = document.getElementById('preview-area');
+        const outputImage = document.getElementById('output-image');
+        const imageMeta = document.getElementById('image-meta');
+        const statusText = document.getElementById('status-text');
+        const spinner = document.getElementById('spinner');
+        const serverPill = document.getElementById('server-pill');
+        const serverPillText = document.getElementById('server-pill-text');
+
+        let lastBlobUrl = null;
+
+        function setStatus(msg, busy = false) {
+            statusText.textContent = msg;
+            spinner.classList.toggle('active', busy);
+        }
+
+        function setServerState(state, label) {
+            serverPill.classList.remove('ready', 'error', 'busy');
+            if (state) serverPill.classList.add(state);
+            serverPillText.textContent = label;
+        }
+
+        // Build Z control rows
+        Z_MODES.forEach(mode => {
+            const row = document.createElement('div');
+            row.className = 'z-row';
+            row.innerHTML = `
+                <div class="z-label">Z${mode.id}<span class="mode-name">${mode.name}</span></div>
+                <input type="range" class="z-slider" id="slider-${mode.id}"
+                       min="-${Z_RANGE}" max="${Z_RANGE}" step="${Z_STEP}" value="0">
+                <input type="number" class="z-number" id="number-${mode.id}"
+                       min="-${Z_RANGE * 2}" max="${Z_RANGE * 2}" step="${Z_STEP}" value="0.00">
+            `;
+            grid.appendChild(row);
+
+            const slider = row.querySelector(`#slider-${mode.id}`);
+            const number = row.querySelector(`#number-${mode.id}`);
+
+            const sync = (val) => {
+                const v = parseFloat(val);
+                if (Number.isFinite(v)) {
+                    slider.value = Math.max(-Z_RANGE, Math.min(Z_RANGE, v));
+                    number.value = v.toFixed(2);
+                    row.classList.toggle('active', Math.abs(v) > 1e-6);
+                }
+            };
+
+            slider.addEventListener('input', (e) => sync(e.target.value));
+            number.addEventListener('change', (e) => sync(e.target.value));
+        });
+
+        function readCoefficients() {
+            const out = {};
+            Z_MODES.forEach(mode => {
+                out[`Z${mode.id}`] = parseFloat(document.getElementById(`number-${mode.id}`).value) || 0;
+            });
+            return out;
+        }
+
+        function describeNonZero(coeffs) {
+            const parts = [];
+            for (const [k, v] of Object.entries(coeffs)) {
+                if (Math.abs(v) > 1e-6) parts.push(`${k}=${v.toFixed(2)}`);
+            }
+            return parts.length ? parts.join(', ') : 'all zeros';
+        }
+
+        // Reset button
+        resetBtn.addEventListener('click', () => {
+            Z_MODES.forEach(mode => {
+                document.getElementById(`slider-${mode.id}`).value = 0;
+                document.getElementById(`number-${mode.id}`).value = '0.00';
+                document.getElementById(`slider-${mode.id}`).closest('.z-row').classList.remove('active');
+            });
+            setStatus('Coefficients reset.');
+        });
+
+        // Generate button
+        generateBtn.addEventListener('click', async () => {
+            const coeffs = readCoefficients();
+            generateBtn.disabled = true;
+            downloadBtn.disabled = true;
+            setStatus(`Generating (${describeNonZero(coeffs)})…`, true);
+            setServerState('busy', 'Computing FFT…');
+
+            const t0 = performance.now();
+            try {
+                const resp = await fetch('/api/generate', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(coeffs),
+                });
+                if (!resp.ok) {
+                    const errText = await resp.text();
+                    throw new Error(errText || `HTTP ${resp.status}`);
+                }
+                const blob = await resp.blob();
+                if (lastBlobUrl) URL.revokeObjectURL(lastBlobUrl);
+                lastBlobUrl = URL.createObjectURL(blob);
+
+                outputImage.src = lastBlobUrl;
+                previewArea.classList.add('has-image');
+
+                const elapsed = ((performance.now() - t0) / 1000).toFixed(2);
+                const sizeKB = (blob.size / 1024).toFixed(1);
+                imageMeta.textContent = `${sizeKB} KB · ${elapsed}s`;
+                setStatus(`✅ Done in ${elapsed}s.`);
+                setServerState('ready', 'Server ready');
+                downloadBtn.disabled = false;
+            } catch (err) {
+                console.error(err);
+                setStatus(`❌ ${err.message}`);
+                setServerState('error', 'Server error');
+            } finally {
+                generateBtn.disabled = false;
+            }
+        });
+
+        // Download button
+        downloadBtn.addEventListener('click', () => {
+            if (!lastBlobUrl) return;
+            const coeffs = readCoefficients();
+            const tag = Object.entries(coeffs)
+                .filter(([_, v]) => Math.abs(v) > 1e-6)
+                .map(([k, v]) => `${k}_${v.toFixed(2)}`)
+                .join('_');
+            const filename = tag ? `flattop_${tag}.png` : 'flattop_ideal.png';
+            const a = document.createElement('a');
+            a.href = lastBlobUrl;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+        });
+
+        // Probe server availability
+        async function probeServer() {
+            try {
+                // A quick HEAD-equivalent: do a tiny POST and accept any response
+                const resp = await fetch('/api/generate', { method: 'OPTIONS' });
+                if (resp.ok || resp.status === 204) {
+                    setServerState('ready', 'Server ready · Press Generate');
+                    setStatus('Ready.');
+                    generateBtn.disabled = false;
+                } else {
+                    throw new Error(`HTTP ${resp.status}`);
+                }
+            } catch (err) {
+                setServerState('error', 'Server offline');
+                setStatus('⚠️ Backend not reachable. Run launch_generator.command first.');
+                generateBtn.disabled = true;
+            }
+        }
+
+        probeServer();
+    </script>
+</body>
+</html>
