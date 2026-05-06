@@ -84,16 +84,25 @@ Linux / Windows). See its own `README.md` for step-by-step instructions.
 
 ## 📥 Model & Data Files (not in repo)
 
-These large binaries are **gitignored** and must be downloaded separately.
-Get them from the **Releases** page of this repository:
-
-> **GitHub → Releases →** download and place each file as shown below.
+These large binaries are **gitignored** and must be downloaded separately
+from the [**v1.0-models release**](https://github.com/Ivan931023/CNNxSLM/releases/tag/v1.0-models):
 
 | File | Size | Place in | Used by |
 | --- | --- | --- | --- |
-| `best_resnet_finetuned.pth` | ~81 MB | `outputs/models/` | `app/app_v2.py`, `scripts/export_onnx.py` |
-| `zernike_resnet_single.onnx` | ~81 MB | `outputs/models/` | `Zernike_predictor.html` |
-| `tensors.mat` | ~65 MB | `data/` *and* `flattop_generator_standalone/` | All `src/*.py` simulators, `app/generator_server.py`, and the standalone folder |
+| [`best_resnet_finetuned.pth`](https://github.com/Ivan931023/CNNxSLM/releases/download/v1.0-models/best_resnet_finetuned.pth) | ~81 MB | `outputs/models/` | `app/app_v2.py`, `scripts/export_onnx.py` |
+| [`zernike_resnet_single.onnx`](https://github.com/Ivan931023/CNNxSLM/releases/download/v1.0-models/zernike_resnet_single.onnx) | ~81 MB | `outputs/models/` | `Zernike_predictor.html` |
+| [`tensors.mat`](https://github.com/Ivan931023/CNNxSLM/releases/download/v1.0-models/tensors.mat) | ~65 MB | `data/` *and* `flattop_generator_standalone/` | All `src/*.py` simulators, `app/generator_server.py`, and the standalone folder |
+
+Quick download (macOS / Linux):
+
+```bash
+mkdir -p outputs/models data
+BASE=https://github.com/Ivan931023/CNNxSLM/releases/download/v1.0-models
+curl -L -o outputs/models/best_resnet_finetuned.pth   $BASE/best_resnet_finetuned.pth
+curl -L -o outputs/models/zernike_resnet_single.onnx  $BASE/zernike_resnet_single.onnx
+curl -L -o data/tensors.mat                           $BASE/tensors.mat
+cp data/tensors.mat flattop_generator_standalone/tensors.mat
+```
 
 If you'd rather rebuild from scratch:
 

@@ -22,10 +22,16 @@ You need **Python 3.8+** installed.
 
 ### 1. Download `tensors.mat`
 
-The 65 MB simulation tensor file is distributed via **GitHub Releases**:
+The 65 MB simulation tensor file is distributed via the
+[**v1.0-models release**](https://github.com/Ivan931023/CNNxSLM/releases/tag/v1.0-models).
+Download [`tensors.mat`](https://github.com/Ivan931023/CNNxSLM/releases/download/v1.0-models/tensors.mat)
+and drop it into **this folder** (alongside `generator_server.py`).
 
-> **GitHub → Releases →** download `tensors.mat` and drop it into **this
-> folder** (alongside `generator_server.py`).
+Or with `curl`:
+
+```bash
+curl -L -o tensors.mat https://github.com/Ivan931023/CNNxSLM/releases/download/v1.0-models/tensors.mat
+```
 
 Without `tensors.mat`, `generator_server.py` will exit immediately with a
 `tensors.mat not found` error.
