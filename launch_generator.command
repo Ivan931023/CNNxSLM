@@ -23,18 +23,22 @@ $PY app/generator_server.py &
 SERVER_PID=$!
 
 # Wait for the server to come up before opening the browser.
-URL="http://localhost:$PORT/Flattop_beam_with_Zernike_aberrations.html"
+GENERATOR_URL="http://localhost:$PORT/Flattop_beam_with_Zernike_aberrations.html"
+CORRECTOR_URL="http://localhost:$PORT/Zernike_aberrations_corrector.html"
 for i in {1..40}; do
     sleep 0.5
-    if curl -s -o /dev/null --max-time 1 "$URL"; then
+    if curl -s -o /dev/null --max-time 1 "$GENERATOR_URL"; then
         break
     fi
 done
 
-open "$URL"
+open "$GENERATOR_URL"
+open "$CORRECTOR_URL"
 
 echo ""
-echo "✅ Generator running at: $URL"
+echo "✅ Server running. Pages:"
+echo "   • Generator:  $GENERATOR_URL"
+echo "   • Corrector:  $CORRECTOR_URL"
 echo ""
 echo "Press Ctrl+C or close this window to stop the server."
 

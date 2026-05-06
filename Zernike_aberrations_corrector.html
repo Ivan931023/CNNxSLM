@@ -1,0 +1,904 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Zernike Aberrations Corrector · Closed-Loop</title>
+
+    <!-- ONNX Runtime Web -->
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web/dist/ort.min.js"></script>
+
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --primary: #38bdf8;
+            --secondary: #8b5cf6;
+            --accent: #10b981;
+            --warn: #fbbf24;
+            --danger: #ef4444;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0;
+            padding: 2rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background: var(--bg-color);
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+            color: var(--text);
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .header { text-align: center; margin-bottom: 2rem; }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin: 0;
+            background: linear-gradient(to right, #38bdf8, #8b5cf6);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p { color: var(--text-muted); margin-top: 0.5rem; }
+
+        .badge {
+            display: inline-block;
+            padding: 0.25rem 0.75rem;
+            border-radius: 9999px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent);
+            margin-bottom: 1rem;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1400px;
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 1.5rem;
+        }
+
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 1.75rem;
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+        }
+
+        .panel-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin: 0 0 1rem 0;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 0.7rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }
+
+        .pill-row {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+            font-size: 0.78rem;
+        }
+
+        .pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.45rem;
+            padding: 0.4rem 0.75rem;
+            border-radius: 999px;
+            background: rgba(15, 23, 42, 0.55);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        .pill .dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--warn);
+            box-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+            transition: all 0.3s ease;
+        }
+        .pill.ready .dot { background: var(--accent); box-shadow: 0 0 8px rgba(16, 185, 129, 0.6); }
+        .pill.error .dot { background: var(--danger); box-shadow: 0 0 8px rgba(239, 68, 68, 0.6); }
+        .pill.busy .dot  { animation: pulse 1.2s ease-in-out infinite; }
+
+        @keyframes pulse {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50%      { opacity: 0.5; transform: scale(0.8); }
+        }
+
+        .controls-grid {
+            display: grid;
+            grid-template-columns: 1.1fr 1.6fr;
+            gap: 1.25rem;
+        }
+
+        @media (max-width: 900px) {
+            .controls-grid { grid-template-columns: 1fr; }
+        }
+
+        .upload-area {
+            display: block;
+            position: relative;
+            border: 2px dashed rgba(56, 189, 248, 0.35);
+            border-radius: 14px;
+            padding: 1.6rem 1rem;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.25s ease;
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.04), rgba(139, 92, 246, 0.04));
+            overflow: hidden;
+        }
+        .upload-area:hover { border-color: var(--primary); transform: translateY(-1px); }
+        .upload-area.dragover { border-style: solid; background: rgba(56, 189, 248, 0.08); }
+        .upload-area input { display: none; }
+
+        .upload-icon {
+            display: inline-flex;
+            align-items: center; justify-content: center;
+            width: 46px; height: 46px;
+            border-radius: 12px;
+            background: linear-gradient(135deg, rgba(56, 189, 248, 0.18), rgba(139, 92, 246, 0.18));
+            font-size: 1.5rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .upload-title { font-weight: 600; font-size: 0.92rem; }
+        .upload-hint  { font-size: 0.72rem; color: var(--text-muted); margin-top: 0.25rem; }
+
+        .upload-preview {
+            display: none;
+            margin-top: 0.85rem;
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            padding: 0.4rem;
+        }
+        .upload-preview.visible { display: block; }
+        .upload-preview img { width: 100%; border-radius: 6px; display: block; }
+        .upload-preview .meta {
+            display: flex; justify-content: space-between;
+            font-size: 0.72rem; color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            padding: 0.4rem 0.25rem 0.1rem;
+        }
+
+        .params-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 0.85rem 1.25rem;
+        }
+        .params-grid label {
+            display: flex; flex-direction: column;
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            gap: 0.4rem;
+        }
+        .params-grid label > .row {
+            display: flex; align-items: center; gap: 0.6rem;
+        }
+        .params-grid input[type="range"] { flex: 1; min-width: 0; }
+        .params-grid input[type="number"] {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            color: var(--text);
+            border-radius: 6px;
+            padding: 0.3rem 0.45rem;
+            font-size: 0.85rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            text-align: right;
+            width: 75px;
+        }
+        .params-grid input[type="number"]:focus { outline: none; border-color: var(--primary); }
+
+        .actions {
+            display: flex;
+            gap: 0.6rem;
+            margin-top: 1.1rem;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            border: none;
+            padding: 0.65rem 1rem;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.88rem;
+            cursor: pointer;
+            transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s;
+        }
+        .btn:hover:not(:disabled)  { transform: translateY(-1px); }
+        .btn:disabled              { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff;
+            flex: 1;
+            box-shadow: 0 4px 12px -4px rgba(56, 189, 248, 0.5);
+        }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06);
+            color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-danger {
+            background: rgba(239, 68, 68, 0.12);
+            color: #fca5a5;
+            border: 1px solid rgba(239, 68, 68, 0.3);
+        }
+
+        .status {
+            margin-top: 0.9rem;
+            padding: 0.7rem 0.9rem;
+            border-radius: 8px;
+            background: rgba(0, 0, 0, 0.28);
+            border: 1px solid var(--border);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            min-height: 1.2rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .spinner {
+            display: none;
+            width: 14px; height: 14px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+            flex-shrink: 0;
+        }
+        .spinner.active { display: inline-block; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        #model-upload-group {
+            display: none;
+            margin-top: 0.9rem;
+            padding: 0.75rem;
+            background: rgba(251, 191, 36, 0.06);
+            border: 1px solid rgba(251, 191, 36, 0.25);
+            border-radius: 8px;
+            font-size: 0.78rem;
+        }
+        #model-upload-group p { margin: 0 0 0.5rem 0; color: var(--warn); line-height: 1.5; }
+        #model-upload { font-size: 0.75rem; width: 100%; color: var(--text-muted); }
+
+        /* Iteration timeline */
+        .timeline {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+            gap: 1rem;
+        }
+
+        .iter-card {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 0.85rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.55rem;
+            position: relative;
+            animation: fadeIn 0.3s ease-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(6px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+        .iter-card.done   { border-color: rgba(16, 185, 129, 0.4); box-shadow: 0 0 16px -8px rgba(16, 185, 129, 0.5); }
+        .iter-card.busy   { border-color: rgba(56, 189, 248, 0.45); }
+        .iter-card.failed { border-color: rgba(239, 68, 68, 0.4); }
+
+        .iter-head {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.78rem;
+        }
+
+        .iter-tag {
+            font-weight: 700;
+            color: var(--primary);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .iter-card.done   .iter-tag { color: var(--accent); }
+        .iter-card.failed .iter-tag { color: var(--danger); }
+
+        .iter-rms {
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            color: var(--text-muted);
+        }
+
+        .iter-img-wrap {
+            position: relative;
+            width: 100%;
+            aspect-ratio: 1 / 1;
+            background: rgba(0, 0, 0, 0.5);
+            border-radius: 8px;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .iter-img-wrap img { width: 100%; height: 100%; object-fit: contain; display: block; }
+        .iter-img-wrap .placeholder {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            text-align: center;
+            padding: 0.5rem;
+        }
+        .iter-img-wrap .mini-spinner {
+            width: 22px; height: 22px;
+            border: 3px solid rgba(255,255,255,0.15);
+            border-top-color: var(--primary);
+            border-radius: 50%;
+            animation: spin 0.9s linear infinite;
+        }
+
+        .iter-modes {
+            font-size: 0.7rem;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+            color: var(--text-muted);
+            line-height: 1.45;
+            max-height: 4.5em;
+            overflow: hidden;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-muted);
+            font-size: 0.95rem;
+        }
+        .empty-state .icon { font-size: 2.5rem; opacity: 0.5; display: block; margin-bottom: 0.6rem; }
+
+        .legend {
+            display: flex;
+            gap: 1rem;
+            font-size: 0.75rem;
+            color: var(--text-muted);
+            flex-wrap: wrap;
+        }
+        .legend span::before {
+            content: "";
+            display: inline-block;
+            width: 9px; height: 9px;
+            border-radius: 50%;
+            margin-right: 0.4rem;
+            vertical-align: middle;
+        }
+        .legend .leg-busy::before { background: var(--primary); }
+        .legend .leg-done::before { background: var(--accent); }
+        .legend .leg-fail::before { background: var(--danger); }
+
+        .summary-line {
+            margin-top: 0.5rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+        }
+        .summary-line .ok   { color: var(--accent); }
+        .summary-line .warn { color: var(--warn); }
+        .summary-line .err  { color: var(--danger); }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="badge">Closed-Loop Aberration Correction</div>
+    <h1>Zernike Aberrations Corrector</h1>
+    <p>Predict → Negate → Scale → Add → Regenerate · Iteratively flatten the beam</p>
+</div>
+
+<div class="container">
+
+    <!-- Top: settings panel -->
+    <div class="panel">
+        <h2 class="panel-title">
+            <span>Setup &amp; Control</span>
+            <div class="pill-row">
+                <span class="pill" id="model-pill"><span class="dot"></span><span id="model-pill-text">Loading model…</span></span>
+                <span class="pill" id="server-pill"><span class="dot"></span><span id="server-pill-text">Probing server…</span></span>
+            </div>
+        </h2>
+
+        <div class="controls-grid">
+
+            <!-- Left: image upload -->
+            <div>
+                <label class="upload-area" id="upload-label">
+                    <input type="file" id="image-upload" accept="image/*">
+                    <div class="upload-icon">📸</div>
+                    <div class="upload-title">Click or drop an aberrated beam image</div>
+                    <div class="upload-hint">PNG · JPG · 500×500 recommended</div>
+                </label>
+
+                <div class="upload-preview" id="upload-preview">
+                    <img id="upload-preview-img" alt="Uploaded preview">
+                    <div class="meta">
+                        <span id="upload-name">—</span>
+                        <span id="upload-size">—</span>
+                    </div>
+                </div>
+
+                <div id="model-upload-group">
+                    <p>⚠️ Cannot auto-load model. Manually select <code>outputs/models/zernike_resnet.onnx</code>:</p>
+                    <input type="file" id="model-upload" accept=".onnx">
+                </div>
+            </div>
+
+            <!-- Right: parameters -->
+            <div>
+                <div class="params-grid">
+                    <label>
+                        Correction factor (gain)
+                        <div class="row">
+                            <input type="range" id="factor-slider" min="0.1" max="1.0" step="0.05" value="0.5">
+                            <input type="number" id="factor-input" min="0.1" max="1.0" step="0.05" value="0.50">
+                        </div>
+                    </label>
+                    <label>
+                        RMS error threshold (stop)
+                        <div class="row">
+                            <input type="range" id="threshold-slider" min="0.005" max="0.5" step="0.005" value="0.05">
+                            <input type="number" id="threshold-input" min="0.0001" max="2.0" step="0.005" value="0.050">
+                        </div>
+                    </label>
+                    <label>
+                        Max iterations
+                        <div class="row">
+                            <input type="range" id="maxiter-slider" min="1" max="50" step="1" value="10">
+                            <input type="number" id="maxiter-input" min="1" max="200" step="1" value="10">
+                        </div>
+                    </label>
+                    <label>
+                        Per-iteration delay (ms)
+                        <div class="row">
+                            <input type="range" id="delay-slider" min="0" max="2000" step="50" value="100">
+                            <input type="number" id="delay-input" min="0" max="10000" step="50" value="100">
+                        </div>
+                    </label>
+                </div>
+
+                <div class="actions">
+                    <button class="btn btn-primary" id="start-btn" disabled>▶ Start correction loop</button>
+                    <button class="btn btn-danger" id="stop-btn" disabled>■ Stop</button>
+                    <button class="btn btn-secondary" id="clear-btn">Clear iterations</button>
+                </div>
+
+                <div class="status" id="status-box">
+                    <span class="spinner" id="spinner"></span>
+                    <span id="status-text">Waiting for model and image…</span>
+                </div>
+                <div class="summary-line" id="summary-line"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Iteration timeline -->
+    <div class="panel">
+        <h2 class="panel-title">
+            <span>Iteration Timeline</span>
+            <div class="legend">
+                <span class="leg-busy">Running</span>
+                <span class="leg-done">Converged / Stopped</span>
+                <span class="leg-fail">Failed</span>
+            </div>
+        </h2>
+
+        <div class="timeline" id="timeline">
+            <div class="empty-state" id="empty-state">
+                <span class="icon">🌌</span>
+                Upload an image and press <b>Start</b>. Each iteration appears here in real time.
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- Hidden canvas for grayscale conversion before inference -->
+<canvas id="process-canvas" width="500" height="500" style="display:none;"></canvas>
+
+<script>
+const ZERNIKE_NAMES = [
+    "Z2: Tilt Y", "Z3: Tilt X", "Z4: Astig 45°", "Z5: Defocus",
+    "Z6: Astig 0°", "Z7: Trefoil Y", "Z8: Coma Y", "Z9: Coma X",
+    "Z10: Trefoil X", "Z11: Quad Y", "Z12: Sec. Astig 45°", "Z13: Spherical",
+    "Z14: Sec. Astig 0°", "Z15: Quad X"
+];
+const N_MODES = 14;
+
+let session = null;
+let serverReady = false;
+let uploadedImage = null;        // HTMLImageElement of the user's upload
+let uploadedFileMeta = null;     // {name, size}
+let running = false;
+let stopRequested = false;
+
+// DOM refs
+const $ = (id) => document.getElementById(id);
+const modelPill        = $('model-pill');
+const modelPillText    = $('model-pill-text');
+const serverPill       = $('server-pill');
+const serverPillText   = $('server-pill-text');
+const statusText       = $('status-text');
+const spinner          = $('spinner');
+const summaryLine      = $('summary-line');
+const startBtn         = $('start-btn');
+const stopBtn          = $('stop-btn');
+const clearBtn         = $('clear-btn');
+const imageUpload      = $('image-upload');
+const uploadLabel      = $('upload-label');
+const uploadPreview    = $('upload-preview');
+const uploadPreviewImg = $('upload-preview-img');
+const uploadName       = $('upload-name');
+const uploadSize       = $('upload-size');
+const modelUploadGroup = $('model-upload-group');
+const modelUpload      = $('model-upload');
+const processCanvas    = $('process-canvas');
+const timeline         = $('timeline');
+const emptyState       = $('empty-state');
+
+// Linked slider+number pairs
+function linkPair(sliderId, numberId, format = (v) => v) {
+    const s = $(sliderId), n = $(numberId);
+    s.addEventListener('input', () => { n.value = format(parseFloat(s.value)); });
+    n.addEventListener('change', () => {
+        let v = parseFloat(n.value);
+        if (!Number.isFinite(v)) v = parseFloat(s.value);
+        const min = parseFloat(s.min), max = parseFloat(s.max);
+        s.value = Math.max(min, Math.min(max, v));
+        n.value = format(v);
+    });
+}
+linkPair('factor-slider',    'factor-input',    (v) => v.toFixed(2));
+linkPair('threshold-slider', 'threshold-input', (v) => v.toFixed(3));
+linkPair('maxiter-slider',   'maxiter-input',   (v) => Math.round(v).toString());
+linkPair('delay-slider',     'delay-input',     (v) => Math.round(v).toString());
+
+function setStatus(msg, busy = false) {
+    statusText.textContent = msg;
+    spinner.classList.toggle('active', busy);
+}
+function setPill(pill, textEl, state, label) {
+    pill.classList.remove('ready', 'error', 'busy');
+    if (state) pill.classList.add(state);
+    textEl.textContent = label;
+}
+function formatBytes(b) {
+    if (b < 1024) return b + ' B';
+    if (b < 1024 * 1024) return (b / 1024).toFixed(1) + ' KB';
+    return (b / (1024 * 1024)).toFixed(2) + ' MB';
+}
+function maybeEnableStart() {
+    startBtn.disabled = !(session && serverReady && uploadedImage && !running);
+}
+function rms(arr) {
+    let s = 0;
+    for (const v of arr) s += v * v;
+    return Math.sqrt(s / arr.length);
+}
+function topModes(arr, k = 3) {
+    const idx = arr.map((v, i) => [Math.abs(v), i, v]).sort((a, b) => b[0] - a[0]);
+    return idx.slice(0, k).map(([_, i, v]) => `${ZERNIKE_NAMES[i].split(':')[0]}=${v >= 0 ? '+' : ''}${v.toFixed(3)}`);
+}
+
+// ---------- Model loading ----------
+async function loadModel(source) {
+    try {
+        setPill(modelPill, modelPillText, 'busy', 'Loading model…');
+        ort.env.wasm.numThreads = 1;
+        if (typeof source === 'string') {
+            session = await ort.InferenceSession.create(source, { executionProviders: ['wasm'] });
+        } else {
+            const buf = await source.arrayBuffer();
+            session = await ort.InferenceSession.create(buf, { executionProviders: ['wasm'] });
+        }
+        setPill(modelPill, modelPillText, 'ready', 'ResNet-34 ready');
+        modelUploadGroup.style.display = 'none';
+        setStatus(serverReady ? 'Ready. Upload an image to begin.' : 'Model ready. Waiting for server…');
+        maybeEnableStart();
+    } catch (err) {
+        console.error('Model load failed:', err);
+        setPill(modelPill, modelPillText, 'error', 'Model not loaded');
+        setStatus('⚠️ Cannot auto-load model. Upload it manually below.');
+        modelUploadGroup.style.display = 'block';
+    }
+}
+modelUpload.addEventListener('change', (e) => {
+    if (e.target.files[0]) loadModel(e.target.files[0]);
+});
+
+// ---------- Server probe ----------
+async function probeServer() {
+    try {
+        const resp = await fetch('/api/generate', { method: 'OPTIONS' });
+        if (resp.ok || resp.status === 204) {
+            serverReady = true;
+            setPill(serverPill, serverPillText, 'ready', 'Generator server ready');
+        } else {
+            throw new Error(`HTTP ${resp.status}`);
+        }
+    } catch (err) {
+        serverReady = false;
+        setPill(serverPill, serverPillText, 'error', 'Generator server offline');
+        setStatus('⚠️ Backend not reachable. Run launch_generator.command first.');
+    }
+    maybeEnableStart();
+}
+
+// ---------- Image handling ----------
+function loadImageFromBlobOrDataURL(src) {
+    return new Promise((resolve, reject) => {
+        const img = new Image();
+        img.onload  = () => resolve(img);
+        img.onerror = reject;
+        img.src = src;
+    });
+}
+
+imageUpload.addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    if (file) handleUpload(file);
+});
+['dragenter', 'dragover'].forEach(evt =>
+    uploadLabel.addEventListener(evt, (e) => { e.preventDefault(); uploadLabel.classList.add('dragover'); })
+);
+['dragleave', 'drop'].forEach(evt =>
+    uploadLabel.addEventListener(evt, (e) => { e.preventDefault(); uploadLabel.classList.remove('dragover'); })
+);
+uploadLabel.addEventListener('drop', (e) => {
+    const f = e.dataTransfer.files[0];
+    if (f) handleUpload(f);
+});
+
+function handleUpload(file) {
+    if (!file.type.startsWith('image/')) return;
+    uploadedFileMeta = { name: file.name, size: file.size };
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+        try {
+            const img = await loadImageFromBlobOrDataURL(ev.target.result);
+            uploadedImage = img;
+            uploadPreviewImg.src = ev.target.result;
+            uploadName.textContent = file.name;
+            uploadSize.textContent = formatBytes(file.size);
+            uploadPreview.classList.add('visible');
+            setStatus(`Loaded "${file.name}". Adjust settings and press Start.`);
+            maybeEnableStart();
+        } catch (err) {
+            setStatus(`Failed to load image: ${err.message || err}`);
+        }
+    };
+    reader.readAsDataURL(file);
+}
+
+// ---------- Inference helpers ----------
+async function predictFromImage(img) {
+    const ctx = processCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.imageSmoothingEnabled = false;
+    ctx.clearRect(0, 0, 500, 500);
+    ctx.drawImage(img, 0, 0, 500, 500);
+    const data = ctx.getImageData(0, 0, 500, 500).data;
+
+    const tensorData = new Float32Array(500 * 500);
+    for (let i = 0; i < 500 * 500; i++) {
+        const r = data[i * 4], g = data[i * 4 + 1], b = data[i * 4 + 2];
+        // Match PIL convert('L') quantisation
+        const lum = Math.floor((r * 299 + g * 587 + b * 114 + 500) / 1000);
+        tensorData[i] = lum / 255.0;
+    }
+    const tensor = new ort.Tensor('float32', tensorData, [1, 1, 500, 500]);
+    const feeds = {};
+    feeds[session.inputNames[0]] = tensor;
+    const out = await session.run(feeds);
+    return Array.from(out[session.outputNames[0]].data);
+}
+
+async function generateImage(coeffs14) {
+    const body = {};
+    for (let i = 0; i < N_MODES; i++) body[`Z${i + 2}`] = coeffs14[i];
+    const resp = await fetch('/api/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    if (!resp.ok) {
+        const t = await resp.text().catch(() => '');
+        throw new Error(t || `HTTP ${resp.status}`);
+    }
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const img = await loadImageFromBlobOrDataURL(url);
+    return { img, url, blob };
+}
+
+// ---------- Iteration card management ----------
+function clearTimeline() {
+    timeline.innerHTML = '';
+    timeline.appendChild(emptyState);
+}
+function addCard(iterTag, label, imgSrc = null) {
+    if (emptyState.parentNode) emptyState.remove();
+    const card = document.createElement('div');
+    card.className = 'iter-card busy';
+    card.innerHTML = `
+        <div class="iter-head">
+            <span class="iter-tag">${iterTag}</span>
+            <span class="iter-rms" data-role="rms">${label}</span>
+        </div>
+        <div class="iter-img-wrap" data-role="img">
+            ${imgSrc
+                ? `<img src="${imgSrc}" alt="iteration ${iterTag}">`
+                : `<div class="mini-spinner"></div>`}
+        </div>
+        <div class="iter-modes" data-role="modes">—</div>
+    `;
+    timeline.appendChild(card);
+    timeline.scrollIntoView({ behavior: 'smooth', block: 'end' });
+    return card;
+}
+function setCardImage(card, imgSrc) {
+    const wrap = card.querySelector('[data-role="img"]');
+    wrap.innerHTML = `<img src="${imgSrc}" alt="iteration">`;
+}
+function setCardError(card, msg) {
+    card.classList.remove('busy');
+    card.classList.add('failed');
+    const wrap = card.querySelector('[data-role="img"]');
+    wrap.innerHTML = `<div class="placeholder">❌ ${msg}</div>`;
+}
+function finalizeCard(card, { rmsVal, modes, done = false }) {
+    card.classList.remove('busy');
+    if (done) card.classList.add('done');
+    card.querySelector('[data-role="rms"]').textContent = `RMS = ${rmsVal.toFixed(4)}`;
+    card.querySelector('[data-role="modes"]').textContent = modes.join('  ');
+}
+
+// ---------- Main loop ----------
+async function runLoop() {
+    if (!session || !serverReady || !uploadedImage) return;
+    if (running) return;
+
+    running = true;
+    stopRequested = false;
+    startBtn.disabled = true;
+    stopBtn.disabled  = false;
+    summaryLine.innerHTML = '';
+    clearTimeline();
+
+    const factor    = parseFloat($('factor-input').value);
+    const threshold = parseFloat($('threshold-input').value);
+    const maxIter   = Math.max(1, parseInt($('maxiter-input').value, 10));
+    const delay     = Math.max(0, parseInt($('delay-input').value, 10));
+
+    setStatus(`Running closed loop · gain=${factor.toFixed(2)} · threshold=${threshold} · maxIter=${maxIter}`, true);
+
+    let stopReason = null;
+    let lastRms = null;
+
+    // ----- Iteration 0: predict on the uploaded image -----
+    const card0 = addCard('Iter 0 (input)', 'predicting…', uploadPreviewImg.src);
+    let params, P;
+    try {
+        P = await predictFromImage(uploadedImage);     // initial prediction
+        params = P.slice();                            // treat predictor output as starting params
+        lastRms = rms(P);
+        finalizeCard(card0, {
+            rmsVal: lastRms,
+            modes: topModes(P, 4),
+            done: lastRms < threshold,
+        });
+    } catch (err) {
+        setCardError(card0, err.message || String(err));
+        running = false;
+        startBtn.disabled = false;
+        stopBtn.disabled  = true;
+        setStatus(`❌ Initial prediction failed: ${err.message || err}`);
+        maybeEnableStart();
+        return;
+    }
+
+    if (lastRms < threshold) {
+        stopReason = `already below threshold at iter 0`;
+    }
+
+    // ----- Iterations 1..maxIter -----
+    for (let it = 1; it <= maxIter && !stopReason && !stopRequested; it++) {
+        // Update params: params = params + (-1) * factor * P
+        const newParams = params.map((p, i) => p - factor * P[i]);
+
+        const card = addCard(`Iter ${it}`, 'generating…');
+        try {
+            const { img, url } = await generateImage(newParams);
+            setCardImage(card, url);
+
+            // Predict on new image
+            card.querySelector('[data-role="rms"]').textContent = 'predicting…';
+            P = await predictFromImage(img);
+            const rmsVal = rms(P);
+            params  = newParams;
+            lastRms = rmsVal;
+
+            const converged = rmsVal < threshold;
+            finalizeCard(card, {
+                rmsVal,
+                modes: topModes(P, 4),
+                done: converged,
+            });
+
+            setStatus(
+                `Iter ${it}/${maxIter} · RMS = ${rmsVal.toFixed(4)} `
+                + `(threshold ${threshold})`,
+                true
+            );
+
+            if (converged) { stopReason = `converged at iter ${it}`; break; }
+        } catch (err) {
+            setCardError(card, err.message || String(err));
+            stopReason = `failed at iter ${it}: ${err.message || err}`;
+            break;
+        }
+
+        if (delay > 0) await new Promise(r => setTimeout(r, delay));
+    }
+
+    if (stopRequested && !stopReason) stopReason = 'stopped by user';
+    if (!stopReason) stopReason = `reached max iterations (${maxIter})`;
+
+    running = false;
+    stopBtn.disabled  = true;
+    setStatus(`Done · ${stopReason}`);
+
+    const ok = lastRms !== null && lastRms < threshold;
+    summaryLine.innerHTML = ok
+        ? `<span class="ok">✅ Converged</span> · final RMS = ${lastRms.toFixed(4)} (threshold ${threshold})`
+        : (stopRequested
+            ? `<span class="warn">⏹ Stopped</span> · last RMS = ${lastRms?.toFixed(4) ?? '—'}`
+            : `<span class="warn">⚠ Did not converge</span> · last RMS = ${lastRms?.toFixed(4) ?? '—'} (threshold ${threshold})`);
+
+    maybeEnableStart();
+}
+
+startBtn.addEventListener('click', runLoop);
+stopBtn.addEventListener('click', () => {
+    if (!running) return;
+    stopRequested = true;
+    setStatus('Stopping after current step…', true);
+});
+clearBtn.addEventListener('click', () => {
+    if (running) return;
+    clearTimeline();
+    summaryLine.innerHTML = '';
+    setStatus(uploadedImage ? 'Ready.' : 'Upload an image to begin.');
+});
+
+// ---------- Boot ----------
+loadModel('outputs/models/zernike_resnet.onnx');
+probeServer();
+</script>
+
+</body>
+</html>
