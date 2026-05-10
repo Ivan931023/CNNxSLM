@@ -1,0 +1,1591 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-CCD Crop &amp; Rescale · 500×500 + RMS report</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --primary: #38bdf8;
+            --secondary: #8b5cf6;
+            --accent: #10b981;
+            --warn: #fbbf24;
+            --danger: #ef4444;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+            --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0; padding: 1.5rem 1rem 3rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-color);
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+            color: var(--text); min-height: 100vh;
+        }
+        .header { text-align: center; margin-bottom: 1.4rem; }
+        .header h1 {
+            font-size: 2.1rem; margin: 0;
+            background: linear-gradient(to right, #38bdf8, #8b5cf6);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .header p { color: var(--text-muted); margin: 0.4rem 0 0; font-size: 0.95rem; }
+        .badge {
+            display: inline-block; padding: 0.2rem 0.7rem; border-radius: 9999px;
+            font-size: 0.78rem; font-weight: 600;
+            background: rgba(16, 185, 129, 0.18); color: var(--accent);
+            margin-bottom: 0.55rem;
+        }
+
+        .container { max-width: 1500px; margin: 0 auto; display: grid; gap: 1.1rem; }
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border); border-radius: 16px;
+            padding: 1.2rem 1.4rem;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        .panel-title {
+            font-size: 1.05rem; font-weight: 600;
+            margin: 0 0 0.95rem; padding-bottom: 0.55rem;
+            border-bottom: 1px solid var(--border);
+            display: flex; justify-content: space-between; align-items: center;
+            gap: 0.75rem; flex-wrap: wrap;
+        }
+        .pill {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.3rem 0.65rem; border-radius: 999px;
+            background: rgba(15, 23, 42, 0.55); border: 1px solid var(--border);
+            color: var(--text-muted); font-size: 0.76rem; font-family: var(--mono);
+        }
+        .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+        .pill.busy .dot { background: var(--primary); animation: pulse 1.2s infinite; }
+        .pill.ok   .dot { background: var(--accent); }
+        @keyframes pulse { 50% { opacity: 0.4; } }
+
+        /* Setup grid */
+        .setup-grid {
+            display: grid;
+            grid-template-columns: 1.2fr 1.4fr 1fr;
+            gap: 1.1rem;
+        }
+        @media (max-width: 1100px) { .setup-grid { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 600px)  { .setup-grid { grid-template-columns: 1fr; } }
+
+        .field { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+        .field-label {
+            display: flex; justify-content: space-between; align-items: baseline;
+            font-size: 0.78rem; color: var(--text-muted);
+        }
+        .field-label .val {
+            font-family: var(--mono); color: var(--primary);
+            min-width: 3.6em; text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .field input[type="range"] {
+            -webkit-appearance: none; appearance: none;
+            width: 100%; height: 6px; margin: 0;
+            background: rgba(255,255,255,0.08); border-radius: 999px;
+        }
+        .field input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none; width: 16px; height: 16px; border-radius: 50%;
+            background: var(--primary); box-shadow: 0 0 8px rgba(56,189,248,0.5); border: none;
+            cursor: pointer;
+        }
+        .field input[type="range"]::-moz-range-thumb {
+            width: 16px; height: 16px; border-radius: 50%; background: var(--primary);
+            border: none; box-shadow: 0 0 8px rgba(56,189,248,0.5); cursor: pointer;
+        }
+        .field input[type="number"], .field select {
+            background: rgba(0, 0, 0, 0.32); border: 1px solid var(--border);
+            color: var(--text); border-radius: 6px;
+            padding: 0.32rem 0.45rem; font-size: 0.84rem;
+            font-family: var(--mono);
+        }
+        .field input[type="number"] { text-align: right; }
+        .field input[type="number"]:focus, .field select:focus {
+            outline: none; border-color: var(--primary);
+        }
+        .row { display: flex; align-items: center; gap: 0.5rem; }
+
+        .upload-area {
+            border: 2px dashed rgba(255, 255, 255, 0.15);
+            border-radius: 10px; padding: 0.8rem; text-align: center;
+            cursor: pointer; transition: 0.15s;
+            color: var(--text-muted); font-size: 0.86rem;
+        }
+        .upload-area:hover { border-color: var(--primary); color: var(--text); }
+        .upload-area input { display: none; }
+        .upload-name { color: var(--text); font-family: var(--mono); font-size: 0.78rem; word-break: break-all; }
+
+        .btn {
+            border: none; padding: 0.55rem 0.9rem; border-radius: 8px;
+            font-weight: 600; font-size: 0.85rem; cursor: pointer;
+            transition: transform 0.15s, opacity 0.15s, box-shadow 0.15s;
+        }
+        .btn:hover:not(:disabled) { transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff; box-shadow: 0 4px 12px -4px rgba(56, 189, 248, 0.5); flex: 1;
+        }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06); color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+
+        /* Visualisation */
+        .vis-grid {
+            display: grid;
+            grid-template-columns: 1.4fr 1fr 1fr;
+            gap: 1rem;
+        }
+        @media (max-width: 1100px) { .vis-grid { grid-template-columns: 1fr; } }
+
+        .canvas-wrap {
+            position: relative;
+            border-radius: 12px; overflow: hidden;
+            background: #000; border: 1px solid var(--border);
+            cursor: crosshair;
+        }
+        .canvas-wrap.no-cursor { cursor: default; }
+        .canvas-wrap canvas {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            display: block; image-rendering: pixelated;
+        }
+        .canvas-wrap.square { aspect-ratio: 1 / 1; }
+        .stage-label {
+            position: absolute; top: 8px; left: 8px;
+            font-size: 0.74rem; font-weight: 600;
+            background: rgba(15, 23, 42, 0.8); color: var(--primary);
+            padding: 0.25rem 0.55rem; border-radius: 6px;
+            border: 1px solid var(--border); font-family: var(--mono);
+        }
+        .canvas-hint {
+            position: absolute; right: 8px; bottom: 8px;
+            font-size: 0.7rem; color: var(--text-muted);
+            background: rgba(0,0,0,0.55); padding: 0.2rem 0.5rem;
+            border-radius: 6px; pointer-events: none; font-family: var(--mono);
+        }
+
+        /* Report */
+        .report-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.7rem;
+        }
+        .report-grid .item {
+            background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+            border-radius: 10px; padding: 0.7rem 0.85rem;
+            display: flex; flex-direction: column; gap: 0.25rem;
+        }
+        .report-grid .item .lbl { font-size: 0.72rem; color: var(--text-muted); }
+        .report-grid .item .val {
+            font-family: var(--mono); font-size: 1rem;
+            font-variant-numeric: tabular-nums;
+        }
+        .val.ok    { color: var(--accent); }
+        .val.warn  { color: var(--warn); }
+        .val.muted { color: var(--text-muted); }
+
+        details {
+            border: 1px solid var(--border); border-radius: 10px;
+            padding: 0.7rem 0.95rem; background: rgba(0,0,0,0.18);
+            margin-top: 0.6rem;
+        }
+        details summary { cursor: pointer; font-weight: 600; color: var(--text); font-size: 0.92rem; }
+        details p, details ul { color: var(--text-muted); font-size: 0.85rem; line-height: 1.6; }
+        details code {
+            background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;
+            font-family: var(--mono); font-size: 0.83rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="badge">Real CCD → 500 × 500 input · centroid · phase-correlation alignment</div>
+    <h1>Crop &amp; Rescale</h1>
+    <p>Bring a real CCD frame into the same 500×500 pixel grid the simulation (and the CNN) expects, then quantify how flat / how close-to-theory the beam is.</p>
+</div>
+
+<div class="container">
+
+    <!-- ============ Inputs & control ============ -->
+    <div class="panel">
+        <h2 class="panel-title">
+            <span>Inputs &amp; control</span>
+            <span class="row">
+                <span class="pill" id="status-pill"><span class="dot"></span><span id="status-text">idle</span></span>
+                <span class="pill">target <strong style="color:var(--text)">500 × 500</strong></span>
+            </span>
+        </h2>
+
+        <div class="setup-grid">
+            <!-- Column 1: Real CCD upload + Theoretical reference (stacked) -->
+            <div class="field">
+                <span class="field-label"><span>Real CCD image</span><span id="real-meta" class="val">—</span></span>
+                <label class="upload-area" for="real-upload">
+                    <strong style="color:var(--text)">Click or drop</strong> a CCD frame
+                    <div id="real-name" class="upload-name">no file selected</div>
+                    <input id="real-upload" type="file" accept="image/*">
+                </label>
+
+                <span class="field-label" style="margin-top:0.7rem">
+                    <span>Theoretical reference</span>
+                    <span id="ref-meta" class="val">default</span>
+                </span>
+                <label class="upload-area" for="ref-upload">
+                    <strong style="color:var(--text)">Click or drop</strong> a 500×500 reference
+                    <div id="ref-name" class="upload-name">outputs/images/ideal_flattop.png</div>
+                    <input id="ref-upload" type="file" accept="image/*">
+                </label>
+                <span class="field-label" style="margin-top:0.3rem">
+                    <span style="font-size:0.72rem;color:var(--text-muted)">
+                        Required for framing-preserving auto sizing, template registration, and RMS metrics.
+                        A default <code style="background:rgba(255,255,255,.06);padding:1px 4px;border-radius:3px">ideal_flattop.png</code> auto-loads from the repo.
+                    </span>
+                </span>
+            </div>
+
+            <!-- Column 2: Crop sizing controls -->
+            <div class="field">
+                <span class="field-label"><span>Crop sizing mode</span><span class="val" id="mode-lbl">auto</span></span>
+                <select id="mode">
+                    <option value="auto" selected>auto · ref-aware framing (recommended)</option>
+                    <option value="halfside">half-side hint · 2 × hint × pad</option>
+                    <option value="pixels">manual · fixed crop side</option>
+                </select>
+
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Padding factor (auto-no-ref / half-side)</span><span class="val" id="pad-lbl">1.10</span>
+                </span>
+                <input type="range" id="pad" min="1.00" max="2.00" step="0.05" value="1.10">
+
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Half-side hint (px, src)</span>
+                    <span class="val" id="rad-lbl">— auto —</span>
+                </span>
+                <input type="number" id="rad" min="1" step="0.5" value=""
+                       placeholder="max(W, H)/2 of beam">
+                <span class="field-label" style="margin-top:0.2rem">
+                    <span style="font-size:0.7rem;color:var(--text-muted)">For Gaussian beams: 1/e² waist from <code style="background:rgba(255,255,255,.06);padding:1px 4px;border-radius:3px">Calibration.html</code>. For bars / rectangles: half of the larger 5%-bbox side.</span>
+                </span>
+
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Manual crop side (px, src)</span>
+                    <span class="val" id="px-lbl">— auto —</span>
+                </span>
+                <input type="number" id="px" min="8" step="1" value="" placeholder="e.g. 500">
+            </div>
+
+            <!-- Column 3: Manual centre + actions -->
+            <div class="field">
+                <span class="field-label"><span>Detected beam centre</span><span class="val" id="cc-lbl">— · —</span></span>
+                <div class="row">
+                    <span style="font-size:0.78rem;color:var(--text-muted);width:0.9rem">x</span>
+                    <input type="number" id="cx-manual" step="0.1" placeholder="auto" style="flex:1">
+                </div>
+                <div class="row" style="margin-top:0.35rem">
+                    <span style="font-size:0.78rem;color:var(--text-muted);width:0.9rem">y</span>
+                    <input type="number" id="cy-manual" step="0.1" placeholder="auto" style="flex:1">
+                </div>
+                <span class="field-label" style="margin-top:0.4rem"><span style="font-size:0.72rem">Click on the source image to override the centre.</span></span>
+                <div class="btn-row" style="margin-top:0.6rem">
+                    <button class="btn btn-primary" id="run-btn" disabled>▶ Run</button>
+                    <button class="btn btn-secondary" id="download-btn" disabled>⬇ 500×500</button>
+                </div>
+                <div class="btn-row" style="margin-top:0.4rem">
+                    <button class="btn btn-secondary" id="reset-centre-btn">Reset centre</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Visualisation ============ -->
+    <div class="panel">
+        <h2 class="panel-title">
+            <span>Live visualisation</span>
+            <span class="row">
+                <span class="pill"><span class="dot" style="background:#ef4444"></span>centre</span>
+                <span class="pill"><span class="dot" style="background:#10b981"></span>crop window</span>
+                <span class="pill"><span class="dot" style="background:#fbbf24"></span>5 % contour</span>
+            </span>
+        </h2>
+
+        <div class="vis-grid">
+            <div>
+                <div id="src-wrap" class="canvas-wrap" style="aspect-ratio: 4/3">
+                    <canvas id="src-canvas"></canvas>
+                    <canvas id="src-overlay"></canvas>
+                    <div class="stage-label" id="src-label">Upload a CCD frame</div>
+                    <div class="canvas-hint" id="src-hint">— · —</div>
+                </div>
+                <div style="display:flex;gap:1rem;margin-top:0.7rem">
+                    <div style="flex:1">
+                        <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem">Source — horizontal cross-section through centre (y = cy)</div>
+                        <canvas id="src-profile" style="width:100%;aspect-ratio:16/9;background:#050a16;border-radius:8px"></canvas>
+                    </div>
+                </div>
+            </div>
+
+            <div>
+                <div class="canvas-wrap square no-cursor">
+                    <canvas id="out-canvas"></canvas>
+                    <div class="stage-label">500 × 500 cropped + rescaled</div>
+                </div>
+                <div style="margin-top:0.7rem">
+                    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem">Top-band mask (raw source coords, ≥ 95 % I<sub>src,max</sub>)</div>
+                    <canvas id="top-canvas" style="width:100%;aspect-ratio:1/1;background:#050a16;border-radius:8px"></canvas>
+                </div>
+            </div>
+
+            <div>
+                <div class="canvas-wrap square no-cursor">
+                    <canvas id="ref-canvas"></canvas>
+                    <div class="stage-label">Reference (500 × 500)</div>
+                </div>
+                <div style="margin-top:0.7rem">
+                    <div style="font-size:0.78rem;color:var(--text-muted);margin-bottom:0.3rem">|I<sub>theo</sub> − I<sub>src</sub>| in source coords (5 % support)</div>
+                    <canvas id="diff-canvas" style="width:100%;aspect-ratio:1/1;background:#050a16;border-radius:8px"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Report ============ -->
+    <div class="panel">
+        <h2 class="panel-title"><span>Calibration report</span></h2>
+        <div class="report-grid">
+            <div class="item"><div class="lbl">Source resolution</div><div class="val" id="r-src-shape">—</div></div>
+            <div class="item"><div class="lbl">Detected centre (src px)</div><div class="val" id="r-centre">—</div></div>
+            <div class="item"><div class="lbl">5 %-bbox (W × H, src px)</div><div class="val" id="r-r5">—</div></div>
+            <div class="item"><div class="lbl">Crop side (src px)</div><div class="val" id="r-side">—</div></div>
+            <div class="item"><div class="lbl">Resample factor</div><div class="val" id="r-rescale">—</div></div>
+            <div class="item"><div class="lbl">Reference centre offset (sim px)</div><div class="val" id="r-shift">—</div></div>
+            <div class="item"><div class="lbl">RMS<sub>2D</sub> (≥ 95 % I<sub>max</sub>)</div><div class="val ok" id="r-rms2d">—</div></div>
+            <div class="item"><div class="lbl">RMS<sub>2D</sub> relative (σ / μ)</div><div class="val ok" id="r-rms2dr">—</div></div>
+            <div class="item"><div class="lbl">RMS<sub>all</sub> (5 % support, peak-norm)</div><div class="val ok" id="r-rmsall">—</div></div>
+            <div class="item"><div class="lbl">RMS<sub>all</sub> relative</div><div class="val ok" id="r-rmsallr">—</div></div>
+        </div>
+
+        <details>
+            <summary>What the pipeline does</summary>
+            <p><b>1. Background subtraction.</b> Median of a 4 %-wide border ring, subtracted from the whole frame. Smoothing is used only to <em>find the centre</em>; the RMS metrics never see a smoothed pixel.</p>
+            <p><b>2. Centre detection.</b> Otsu / 50 % threshold on a Gaussian-smoothed (σ=2 px) copy, weighted centroid of the largest connected component, then 3×3 parabolic sub-pixel refinement of the smoothed-intensity argmax.</p>
+            <p><b>3. Crop sizing.</b> Four ways:</p>
+            <ul>
+              <li><code>auto</code> with reference: <code>side = 500·√(A<sub>src</sub>/A<sub>ref</sub>)</code> where A is the 5%-mask area. <em>Preserves the simulation framing</em> — the beam ends up occupying the same relative area of the 500×500 output as in the reference.</li>
+              <li><code>auto</code> without reference: <code>2·max(W,H)<sub>5%-bbox</sub>·pad</code> — beam fills the output. <code>max(W,H)</code>, not the diagonal, so non-circular shapes fit.</li>
+              <li><code>radius</code>: <code>2·R<sub>exp</sub>·pad</code>, R<sub>exp</sub> from <code>Calibration.html</code>.</li>
+              <li><code>pixels</code>: a fixed side directly.</li>
+            </ul>
+            <p><b>4. Template registration.</b> Refines (cx, cy) in source coordinates by phase-correlating the source patch against the theoretical reference resized to <code>side × side</code> source pixels. Uses the <em>full intensity</em> — captures the asymmetric lobes, ringing and dark-spot offsets of an aberrated flattop, which a contour-based aligner would miss. Sub-pixel via 3×3 parabolic refinement on the cross-correlation peak.</p>
+            <p><b>5. CNN input.</b> Crop the source at the registered (cx, cy) with the chosen side; bicubic-resample to 500×500. This image is for the CNN <em>only</em>; the RMS metrics use the raw source pixels.</p>
+            <p><b>6. RMS<sub>2D</sub> on RAW source.</b> σ of the raw source intensities over pixels whose value is ≥ 95 % of I<sub>src,max</sub>. No smoothing, no rescaling. Reported absolute (peak-normalised) and relative (σ/μ).</p>
+            <p><b>7. RMS<sub>all</sub> on RAW source.</b> For each source pixel inside the crop region, the corresponding sub-pixel theoretical value is taken via the inverse crop transform <code>(sim_x,sim_y) = (250 + (x−cx)·500/side, 250 + (y−cy)·500/side)</code> and a bicubic sample on the 500×500 reference. RMS of (I<sub>theo</sub> − I<sub>src</sub>) is then computed over the <em>intersection of the two 5 % support masks in source coordinates</em>, both peak-normalised. The experimental side of the difference is always a raw source pixel value.</p>
+        </details>
+    </div>
+
+</div>
+
+<script>
+"use strict";
+// =========================================================================
+//  Real-CCD crop & rescale pipeline (pure-JS port of src/crop_and_rescale.py)
+// =========================================================================
+const TARGET = 500;
+const $ = id => document.getElementById(id);
+
+// ---- DOM handles --------------------------------------------------------
+const srcWrap  = $('src-wrap');
+const srcCanvas = $('src-canvas'),  srcCtx  = srcCanvas.getContext('2d');
+const srcOver   = $('src-overlay'), overCtx = srcOver.getContext('2d');
+const outCanvas = $('out-canvas'),  outCtx  = outCanvas.getContext('2d');
+const refCanvas = $('ref-canvas'),  refCtx  = refCanvas.getContext('2d');
+const topCanvas = $('top-canvas');
+const diffCanvas = $('diff-canvas');
+const profCanvas = $('src-profile');
+
+let realImage = null;     // ImageBitmap-ish HTMLImageElement
+let realData  = null;     // Float32Array luminance, [H*W], range [0,1]
+let realW = 0, realH = 0;
+
+let refData   = null;     // Float32Array, 500*500, raw luma of reference
+let refDataBs = null;     // Float32Array, 500*500, background-subtracted (for math)
+let refImage  = null;     // HTMLImageElement of the reference (for display)
+const REF_DEFAULT = 'outputs/images/ideal_flattop.png';
+
+let manualCentre = null;  // {x, y} when set by click or input
+let lastCentre   = null;  // {cx, cy, r5, bbox}
+let lastOutput   = null;  // Float32Array 500*500
+
+// =========================================================================
+//  Status helpers
+// =========================================================================
+function setStatus(text, klass) {
+    $('status-text').textContent = text;
+    const pill = $('status-pill');
+    pill.classList.remove('busy', 'ok'); if (klass) pill.classList.add(klass);
+}
+function setStage(text) { $('src-label').textContent = text; }
+
+// =========================================================================
+//  Image loading
+// =========================================================================
+function loadImageURL(url) {
+    return new Promise((res, rej) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => res(img);
+        img.onerror = rej;
+        img.src = url;
+    });
+}
+
+// Pre-built turbo lookup table for inverse-mapping a colored PNG back to
+// linear intensity.  matplotlib's turbo is non-monotonic in luma — bg
+// pixels (purple) and peak pixels (dark red) both have low luma, while
+// mid-intensity pixels (yellow) are bright.  Computing flatness / contour
+// metrics on luma therefore measures the wrong thing for any flattop
+// rendered with cmap='turbo' (which is exactly what dataset_generator.py
+// produces).
+const TURBO_LUT_N = 256;   // matches an 8-bit turbo PNG's effective t resolution
+const TURBO_LUT = new Float32Array(TURBO_LUT_N * 3);
+(() => {
+    for (let i = 0; i < TURBO_LUT_N; i++) {
+        const rgb = turbo(i / (TURBO_LUT_N - 1));
+        TURBO_LUT[i * 3]     = rgb[0];
+        TURBO_LUT[i * 3 + 1] = rgb[1];
+        TURBO_LUT[i * 3 + 2] = rgb[2];
+    }
+})();
+
+function invertTurbo(R, G, B) {
+    let bestI = 0, bestDist = Infinity;
+    for (let i = 0; i < TURBO_LUT_N; i++) {
+        const dr = R - TURBO_LUT[i * 3];
+        const dg = G - TURBO_LUT[i * 3 + 1];
+        const db = B - TURBO_LUT[i * 3 + 2];
+        const d = dr * dr + dg * dg + db * db;
+        if (d < bestDist) { bestDist = d; bestI = i; }
+    }
+    return bestI / (TURBO_LUT_N - 1);
+}
+
+// Convert an HTMLImageElement to a Float32 linear-intensity map in [0, 1].
+// If the image is grayscale (R == G == B for ~all pixels), uses luma as
+// intensity directly.  Otherwise assumes a turbo-mapped colormap and
+// inverts it via the precomputed LUT.  Returns the intensity array.
+function imageToLuma(img) {
+    const w = img.naturalWidth, h = img.naturalHeight;
+    const c = document.createElement('canvas'); c.width = w; c.height = h;
+    const ctx = c.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(img, 0, 0);
+    const d = ctx.getImageData(0, 0, w, h).data;
+
+    // Cheap grayscale heuristic: sample ~2500 evenly-spaced pixels.
+    let isGray = true;
+    const step = Math.max(1, Math.floor(d.length / (4 * 2500)));
+    for (let j = 0; j < d.length; j += 4 * step) {
+        if (Math.abs(d[j] - d[j + 1]) > 4 || Math.abs(d[j + 1] - d[j + 2]) > 4) {
+            isGray = false; break;
+        }
+    }
+
+    const out = new Float32Array(w * h);
+    if (isGray) {
+        for (let i = 0, j = 0; i < out.length; i++, j += 4) {
+            const v = Math.floor((d[j] * 299 + d[j + 1] * 587 + d[j + 2] * 114 + 500) / 1000);
+            out[i] = v / 255.0;
+        }
+    } else {
+        for (let i = 0, j = 0; i < out.length; i++, j += 4) {
+            out[i] = invertTurbo(d[j], d[j + 1], d[j + 2]);
+        }
+    }
+    return { data: out, width: w, height: h, isGray };
+}
+
+async function setRealImage(img) {
+    realImage = img;
+    const { data, width, height } = imageToLuma(img);
+    realData = data; realW = width; realH = height;
+
+    // Fit the source canvas
+    const aspect = width / height;
+    srcWrap.style.aspectRatio = aspect.toFixed(4);
+    srcCanvas.width = width;  srcCanvas.height = height;
+    srcOver.width   = width;  srcOver.height   = height;
+    drawSourceFromLuma();
+
+    $('r-src-shape').textContent = `${width} × ${height}`;
+    enableRun();
+    setStatus('ready'); setStage('Click "Run" or click the image to set centre');
+}
+
+async function setRefImageFromImg(img) {
+    refImage = img;
+    const { data, width, height } = imageToLuma(img);
+    refData   = resampleTo(data, width, height, TARGET, TARGET);
+    // Reference often has a non-zero background floor (e.g. matplotlib turbo
+    // colormap renders zero-intensity pixels as dark purple, not black, so
+    // the PNG luma has a floor ≈ 0.125).  All math (auto sizing, template
+    // registration, RMS) must use the bg-subtracted version.
+    refDataBs = backgroundSubtract(refData, TARGET, TARGET);
+    drawRef();
+}
+
+// =========================================================================
+//  Drawing helpers
+// =========================================================================
+function turbo(t) {
+    // Compact turbo approximation; matches matplotlib.cm.turbo within a few %.
+    t = Math.max(0, Math.min(1, t));
+    const r = 34.61 + t * (1172.33 - t * (10793.56 - t * (33300.12 - t * (38394.49 - t * 14825.05))));
+    const g = 23.31 + t * (557.33  + t * (1225.33  - t * (3574.96  - t * (1073.77  + t * 707.56))));
+    const b = 27.2  + t * (3211.1  - t * (15327.97 - t * (27814.0  - t * (22569.18 - t * 6838.66))));
+    return [Math.max(0, Math.min(255, r | 0)),
+            Math.max(0, Math.min(255, g | 0)),
+            Math.max(0, Math.min(255, b | 0))];
+}
+
+function drawHeatmap(canvas, data, w, h, peak = null) {
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(w, h);
+    const inv = 1 / Math.max(1e-12, peak ?? maxOf(data));
+    const dst = img.data;
+    for (let i = 0, j = 0; i < data.length; i++, j += 4) {
+        const t = Math.max(0, Math.min(1, data[i] * inv));
+        const [r, g, b] = turbo(t);
+        dst[j] = r; dst[j + 1] = g; dst[j + 2] = b; dst[j + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+}
+
+function drawBinary(canvas, mask, w, h, color = [56, 189, 248]) {
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#02050d'; ctx.fillRect(0, 0, w, h);
+    const img = ctx.createImageData(w, h);
+    const dst = img.data;
+    for (let i = 0, j = 0; i < mask.length; i++, j += 4) {
+        if (mask[i]) {
+            dst[j] = color[0]; dst[j + 1] = color[1]; dst[j + 2] = color[2]; dst[j + 3] = 220;
+        } else {
+            dst[j] = 8; dst[j + 1] = 12; dst[j + 2] = 22; dst[j + 3] = 255;
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+}
+
+function drawSourceFromLuma() {
+    if (!realData) return;
+    // Display the *original* uploaded image (preserve its colormap, e.g. a
+    // turbo-mapped CCD capture renders as turbo, a grayscale capture renders
+    // as grayscale).  The algorithm still operates on the luma in `realData`.
+    if (realImage && realImage.naturalWidth) {
+        srcCanvas.width = realImage.naturalWidth;
+        srcCanvas.height = realImage.naturalHeight;
+        srcCtx.imageSmoothingEnabled = false;
+        srcCtx.drawImage(realImage, 0, 0);
+    } else {
+        drawHeatmap(srcCanvas, realData, realW, realH, maxOf(realData));
+    }
+    drawSourceOverlay();
+}
+
+function drawSourceOverlay() {
+    overCtx.clearRect(0, 0, realW, realH);
+    if (!lastCentre) return;
+    const { cx, cy, bbox } = lastCentre;
+    const lw = Math.max(2, Math.round(Math.min(realW, realH) / 600));
+
+    // 5 % contour bounding box (yellow)
+    if (bbox) {
+        const [x0, y0, x1, y1] = bbox;
+        overCtx.strokeStyle = 'rgba(251, 191, 36, 0.85)';
+        overCtx.lineWidth = lw;
+        overCtx.setLineDash([8, 6]);
+        overCtx.strokeRect(x0, y0, x1 - x0, y1 - y0);
+        overCtx.setLineDash([]);
+    }
+
+    // Crop window (green)
+    if (lastCentre.side) {
+        const half = lastCentre.side / 2;
+        overCtx.strokeStyle = 'rgba(16, 185, 129, 0.95)';
+        overCtx.lineWidth = lw * 1.3;
+        overCtx.strokeRect(cx - half, cy - half, lastCentre.side, lastCentre.side);
+    }
+
+    // Centre cross (red)
+    overCtx.strokeStyle = 'rgba(239, 68, 68, 0.95)';
+    overCtx.lineWidth = lw * 1.5;
+    const r = Math.max(8, Math.min(realW, realH) / 70);
+    overCtx.beginPath();
+    overCtx.moveTo(cx - r, cy); overCtx.lineTo(cx + r, cy);
+    overCtx.moveTo(cx, cy - r); overCtx.lineTo(cx, cy + r);
+    overCtx.stroke();
+}
+
+function drawOutput() {
+    if (!lastOutput) return;
+    // Visual fidelity: draw the 500×500 output by re-cropping the *original*
+    // source bitmap with the registered (cx, cy, side).  This preserves the
+    // source's exact colormap (turbo PNG → turbo PNG, grayscale → grayscale)
+    // so the output panel matches the reference panel side-by-side.  The
+    // luma values fed to the CNN (lastOutput) are computed separately.
+    if (realImage && realImage.naturalWidth && lastCentre) {
+        outCanvas.width = TARGET; outCanvas.height = TARGET;
+        const ctx = outCanvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.fillStyle = '#000'; ctx.fillRect(0, 0, TARGET, TARGET);
+        const { cx, cy, side } = lastCentre;
+        ctx.drawImage(realImage,
+            cx - side / 2, cy - side / 2, side, side,   // source rect
+            0, 0, TARGET, TARGET                        // dest rect
+        );
+    } else {
+        drawHeatmap(outCanvas, lastOutput, TARGET, TARGET, maxOf(lastOutput));
+    }
+}
+function drawRef() {
+    if (!refData) return;
+    if (refImage && refImage.naturalWidth) {
+        refCanvas.width = refImage.naturalWidth;
+        refCanvas.height = refImage.naturalHeight;
+        const ctx = refCanvas.getContext('2d');
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(refImage, 0, 0);
+    } else {
+        drawHeatmap(refCanvas, refData, TARGET, TARGET, maxOf(refData));
+    }
+}
+
+function drawProfile(samples, peak, centreX) {
+    const dpr = devicePixelRatio || 1;
+    const w = profCanvas.width  = Math.max(1, Math.round(profCanvas.clientWidth * dpr));
+    const h = profCanvas.height = Math.max(1, Math.round(profCanvas.clientHeight * dpr));
+    const ctx = profCanvas.getContext('2d');
+    ctx.fillStyle = '#050a16'; ctx.fillRect(0, 0, w, h);
+    if (!samples || !samples.length) return;
+    const padL = 32 * dpr, padR = 12 * dpr, padT = 10 * dpr, padB = 18 * dpr;
+    const pw = w - padL - padR, ph = h - padT - padB;
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+    ctx.strokeRect(padL, padT, pw, ph);
+
+    // 5% threshold line
+    const yRef = padT + ph - 0.05 * ph;
+    ctx.strokeStyle = 'rgba(251,191,36,0.4)'; ctx.setLineDash([4, 4]);
+    ctx.beginPath(); ctx.moveTo(padL, yRef); ctx.lineTo(padL + pw, yRef); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(251,191,36,0.7)';
+    ctx.font = `${10 * dpr}px ui-monospace`;
+    ctx.fillText('5 %', padL + 4, yRef - 3);
+
+    // Vertical line at the beam centre x
+    if (typeof centreX === 'number' && isFinite(centreX)) {
+        const cxPx = padL + (centreX / Math.max(1, samples.length - 1)) * pw;
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.55)'; ctx.setLineDash([3, 4]);
+        ctx.beginPath(); ctx.moveTo(cxPx, padT); ctx.lineTo(cxPx, padT + ph); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
+        ctx.fillText(`cx = ${centreX.toFixed(1)}`, cxPx + 3, padT + 11 * dpr);
+    }
+
+    ctx.strokeStyle = '#38bdf8'; ctx.lineWidth = 1.6 * dpr;
+    ctx.beginPath();
+    const N = samples.length;
+    for (let i = 0; i < N; i++) {
+        const x = padL + (i / Math.max(1, N - 1)) * pw;
+        const y = padT + ph - (samples[i] / peak) * ph;
+        if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(148,163,184,0.85)';
+    ctx.fillText('x (src px)', padL + pw - 56 * dpr, h - 5 * dpr);
+    ctx.fillText('I / I_max', 4 * dpr, padT + 9 * dpr);
+}
+
+// =========================================================================
+//  Pipeline: background, smoothing, centre, crop, resample
+// =========================================================================
+function maxOf(a) { let m = -Infinity; for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i]; return m; }
+
+function estimateBackground(I, w, h, frac = 0.04) {
+    const b = Math.max(1, Math.round(Math.min(w, h) * frac));
+    const samples = [];
+    for (let y = 0; y < b; y++)
+        for (let x = 0; x < w; x++) samples.push(I[y * w + x]);
+    for (let y = h - b; y < h; y++)
+        for (let x = 0; x < w; x++) samples.push(I[y * w + x]);
+    for (let y = b; y < h - b; y++) {
+        for (let x = 0; x < b; x++)        samples.push(I[y * w + x]);
+        for (let x = w - b; x < w; x++)    samples.push(I[y * w + x]);
+    }
+    samples.sort((a, b) => a - b);
+    return samples[samples.length >> 1];
+}
+
+function backgroundSubtract(I, w, h) {
+    const bg = estimateBackground(I, w, h);
+    const out = new Float32Array(I.length);
+    for (let i = 0; i < I.length; i++) out[i] = Math.max(0, I[i] - bg);
+    return out;
+}
+
+// 1-D Gaussian kernel
+function gaussianKernel(sigma) {
+    const r = Math.max(1, Math.ceil(sigma * 3));
+    const k = new Float32Array(2 * r + 1);
+    let s = 0;
+    for (let i = -r; i <= r; i++) {
+        const v = Math.exp(-(i * i) / (2 * sigma * sigma));
+        k[i + r] = v; s += v;
+    }
+    for (let i = 0; i < k.length; i++) k[i] /= s;
+    return { k, r };
+}
+function gaussianSmooth(I, w, h, sigma) {
+    if (sigma <= 0) return I.slice();
+    const { k, r } = gaussianKernel(sigma);
+    const tmp = new Float32Array(w * h);
+    const out = new Float32Array(w * h);
+    // x-pass
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            let s = 0;
+            for (let i = -r; i <= r; i++) {
+                let xi = x + i; if (xi < 0) xi = 0; else if (xi >= w) xi = w - 1;
+                s += I[y * w + xi] * k[i + r];
+            }
+            tmp[y * w + x] = s;
+        }
+    }
+    // y-pass
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            let s = 0;
+            for (let i = -r; i <= r; i++) {
+                let yi = y + i; if (yi < 0) yi = 0; else if (yi >= h) yi = h - 1;
+                s += tmp[yi * w + x] * k[i + r];
+            }
+            out[y * w + x] = s;
+        }
+    }
+    return out;
+}
+
+function otsuThreshold(I) {
+    const Imax = maxOf(I); if (Imax <= 0) return 0;
+    const bins = 256;
+    const hist = new Uint32Array(bins);
+    const inv = (bins - 1) / Imax;
+    for (let i = 0; i < I.length; i++) hist[Math.min(bins - 1, Math.max(0, (I[i] * inv) | 0))]++;
+    const total = I.length;
+    let sum = 0; for (let i = 0; i < bins; i++) sum += i * hist[i];
+    let sumB = 0, wB = 0, varMax = -1, kBest = 0;
+    for (let i = 0; i < bins; i++) {
+        wB += hist[i]; if (wB === 0) continue;
+        const wF = total - wB; if (wF === 0) break;
+        sumB += i * hist[i];
+        const mB = sumB / wB, mF = (sum - sumB) / wF;
+        const v = wB * wF * (mB - mF) * (mB - mF);
+        if (v > varMax) { varMax = v; kBest = i; }
+    }
+    return kBest / inv;
+}
+
+function largestComponent(mask, w, h) {
+    // 4-connected flood-fill, returns a binary mask of the largest CC.
+    const lab = new Int32Array(mask.length);
+    const sizes = [0];
+    let cur = 0;
+    const stack = new Int32Array(mask.length);
+    for (let p = 0; p < mask.length; p++) {
+        if (!mask[p] || lab[p]) continue;
+        cur++;
+        let top = 0; stack[top++] = p; lab[p] = cur;
+        let cnt = 0;
+        while (top) {
+            const q = stack[--top]; cnt++;
+            const x = q % w, y = (q / w) | 0;
+            if (x > 0)     { const r = q - 1; if (mask[r] && !lab[r]) { lab[r] = cur; stack[top++] = r; } }
+            if (x < w - 1) { const r = q + 1; if (mask[r] && !lab[r]) { lab[r] = cur; stack[top++] = r; } }
+            if (y > 0)     { const r = q - w; if (mask[r] && !lab[r]) { lab[r] = cur; stack[top++] = r; } }
+            if (y < h - 1) { const r = q + w; if (mask[r] && !lab[r]) { lab[r] = cur; stack[top++] = r; } }
+        }
+        sizes.push(cnt);
+    }
+    let best = 0, bestSize = 0;
+    for (let i = 1; i < sizes.length; i++) if (sizes[i] > bestSize) { bestSize = sizes[i]; best = i; }
+    const out = new Uint8Array(mask.length);
+    if (best === 0) return out;
+    for (let i = 0; i < lab.length; i++) if (lab[i] === best) out[i] = 1;
+    return out;
+}
+
+function detectCentre(I, w, h) {
+    const Ibs = backgroundSubtract(I, w, h);
+    const Is = gaussianSmooth(Ibs, w, h, 2.0);
+    const Imax = maxOf(Is);
+    if (Imax <= 0) return null;
+    const tOtsu = otsuThreshold(Is);
+    const tPct  = 0.5 * Imax;
+    const t = Math.max(tOtsu, tPct, 0.05 * Imax);
+
+    const mask = new Uint8Array(Is.length);
+    for (let i = 0; i < Is.length; i++) mask[i] = Is[i] >= t ? 1 : 0;
+    const cc = largestComponent(mask, w, h);
+
+    let sx = 0, sy = 0, sw = 0;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            const p = y * w + x;
+            if (!cc[p]) continue;
+            const v = Is[p];
+            sx += x * v; sy += y * v; sw += v;
+        }
+    }
+    if (sw <= 0) return null;
+    let cx0 = sx / sw, cy0 = sy / sw;
+
+    // Sub-pixel: parabolic interpolation around the integer (cx0, cy0)
+    const cxi = Math.max(1, Math.min(w - 2, Math.round(cx0)));
+    const cyi = Math.max(1, Math.min(h - 2, Math.round(cy0)));
+    const ax = Is[cyi * w + cxi - 1], bx = Is[cyi * w + cxi], cxv = Is[cyi * w + cxi + 1];
+    const ay = Is[(cyi - 1) * w + cxi], by = bx, cyv = Is[(cyi + 1) * w + cxi];
+    const dxden = ax - 2 * bx + cxv, dyden = ay - 2 * by + cyv;
+    const dx = dxden !== 0 ? Math.max(-1, Math.min(1, 0.5 * (ax - cxv) / dxden)) : 0;
+    const dy = dyden !== 0 ? Math.max(-1, Math.min(1, 0.5 * (ay - cyv) / dyden)) : 0;
+    const cx = cxi + dx, cy = cyi + dy;
+
+    // 5% support bounding box & equivalent radius
+    const m5 = new Uint8Array(Is.length);
+    for (let i = 0; i < Is.length; i++) m5[i] = Is[i] >= 0.05 * Imax ? 1 : 0;
+    const cc5 = largestComponent(m5, w, h);
+    let x0 = w, y0 = h, x1 = 0, y1 = 0, anyM5 = 0;
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) {
+            if (!cc5[y * w + x]) continue;
+            anyM5 = 1;
+            if (x < x0) x0 = x; if (x > x1) x1 = x;
+            if (y < y0) y0 = y; if (y > y1) y1 = y;
+        }
+    }
+    let r5, r5_bbox, suppArea;
+    if (anyM5) {
+        r5 = 0.5 * Math.hypot(x1 - x0, y1 - y0);
+        r5_bbox = 0.5 * Math.max(x1 - x0, y1 - y0);
+        suppArea = 0; for (let i = 0; i < cc5.length; i++) if (cc5[i]) suppArea++;
+    } else {
+        x0 = 0; y0 = 0; x1 = w; y1 = h;
+        r5 = 0.25 * Math.min(w, h);
+        r5_bbox = 0.25 * Math.min(w, h);
+        suppArea = 0;
+    }
+
+    return { cx, cy, r5, r5_bbox, suppArea, bbox: [x0, y0, x1, y1] };
+}
+
+// Pixel count of the largest connected component of (I >= frac * I.max())
+// — used by auto-sizing to match reference framing.
+function supportArea(I, w, h, frac) {
+    const Imax = maxOf(I); if (Imax <= 0) return 0;
+    const m = new Uint8Array(I.length);
+    for (let i = 0; i < I.length; i++) m[i] = I[i] >= frac * Imax ? 1 : 0;
+    const cc = largestComponent(m, w, h);
+    let n = 0; for (let i = 0; i < cc.length; i++) if (cc[i]) n++;
+    return n;
+}
+
+// Bicubic single-point sub-pixel sampler — mirror of scipy map_coordinates.
+function bicubicSample(I, w, h, x, y) {
+    const a = -0.5;
+    function cubic(t) {
+        const u = Math.abs(t);
+        if (u < 1) return ((a + 2) * u - (a + 3)) * u * u + 1;
+        if (u < 2) return (((u - 5) * u + 8) * u - 4) * a;
+        return 0;
+    }
+    if (x < -2 || y < -2 || x > w + 1 || y > h + 1) return 0;
+    const ix = Math.floor(x), iy = Math.floor(y);
+    const fx = x - ix, fy = y - iy;
+    let s = 0, ws = 0;
+    for (let j = -1; j <= 2; j++) {
+        const yy = Math.max(0, Math.min(h - 1, iy + j));
+        const wy = cubic(j - fy);
+        for (let i = -1; i <= 2; i++) {
+            const xx = Math.max(0, Math.min(w - 1, ix + i));
+            const wxw = cubic(i - fx) * wy;
+            s += I[yy * w + xx] * wxw; ws += wxw;
+        }
+    }
+    return ws !== 0 ? s / ws : 0;
+}
+
+// Bicubic resample of a (sw × sh) Float32 to (dw × dh).
+function resampleTo(src, sw, sh, dw, dh) {
+    const out = new Float32Array(dw * dh);
+    const sx = sw / dw, sy = sh / dh;
+    function cubic(t) { // Mitchell B=0, C=0.5 ≈ Catmull–Rom
+        const a = -0.5, x = Math.abs(t);
+        if (x < 1) return ((a + 2) * x - (a + 3)) * x * x + 1;
+        if (x < 2) return (((x - 5) * x + 8) * x - 4) * a;
+        return 0;
+    }
+    function sample(x, y) {
+        const ix = Math.floor(x), iy = Math.floor(y);
+        const fx = x - ix, fy = y - iy;
+        let s = 0, ws = 0;
+        for (let j = -1; j <= 2; j++) {
+            const yy = Math.max(0, Math.min(sh - 1, iy + j));
+            const wy = cubic(j - fy);
+            for (let i = -1; i <= 2; i++) {
+                const xx = Math.max(0, Math.min(sw - 1, ix + i));
+                const w_ = cubic(i - fx) * wy;
+                s += src[yy * sw + xx] * w_;
+                ws += w_;
+            }
+        }
+        return ws !== 0 ? s / ws : 0;
+    }
+    for (let y = 0; y < dh; y++) {
+        const sY = (y + 0.5) * sy - 0.5;
+        for (let x = 0; x < dw; x++) {
+            const sX = (x + 0.5) * sx - 0.5;
+            const v = sample(sX, sY);
+            out[y * dw + x] = v < 0 ? 0 : v;
+        }
+    }
+    return out;
+}
+
+// =========================================================================
+//  Alignment + RMS metrics
+// =========================================================================
+function fft1d(re, im, inverse) {
+    const N = re.length;
+    // bit-reverse
+    for (let i = 1, j = 0; i < N; i++) {
+        let bit = N >> 1;
+        for (; j & bit; bit >>= 1) j ^= bit;
+        j ^= bit;
+        if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (let len = 2; len <= N; len <<= 1) {
+        const ang = (inverse ? 2 : -2) * Math.PI / len;
+        const wRe = Math.cos(ang), wIm = Math.sin(ang);
+        for (let i = 0; i < N; i += len) {
+            let cRe = 1, cIm = 0;
+            for (let j = 0; j < (len >> 1); j++) {
+                const uRe = re[i + j], uIm = im[i + j];
+                const vRe = re[i + j + (len >> 1)] * cRe - im[i + j + (len >> 1)] * cIm;
+                const vIm = re[i + j + (len >> 1)] * cIm + im[i + j + (len >> 1)] * cRe;
+                re[i + j] = uRe + vRe; im[i + j] = uIm + vIm;
+                re[i + j + (len >> 1)] = uRe - vRe; im[i + j + (len >> 1)] = uIm - vIm;
+                const nRe = cRe * wRe - cIm * wIm;
+                const nIm = cRe * wIm + cIm * wRe;
+                cRe = nRe; cIm = nIm;
+            }
+        }
+    }
+    if (inverse) for (let i = 0; i < N; i++) { re[i] /= N; im[i] /= N; }
+}
+function fft2d(re, im, w, h, inverse) {
+    const rowRe = new Float32Array(w), rowIm = new Float32Array(w);
+    const colRe = new Float32Array(h), colIm = new Float32Array(h);
+    for (let y = 0; y < h; y++) {
+        for (let x = 0; x < w; x++) { rowRe[x] = re[y * w + x]; rowIm[x] = im[y * w + x]; }
+        fft1d(rowRe, rowIm, inverse);
+        for (let x = 0; x < w; x++) { re[y * w + x] = rowRe[x]; im[y * w + x] = rowIm[x]; }
+    }
+    for (let x = 0; x < w; x++) {
+        for (let y = 0; y < h; y++) { colRe[y] = re[y * w + x]; colIm[y] = im[y * w + x]; }
+        fft1d(colRe, colIm, inverse);
+        for (let y = 0; y < h; y++) { re[y * w + x] = colRe[y]; im[y * w + x] = colIm[y]; }
+    }
+}
+
+// FFT routines need a power-of-2 grid. Pad/unpad to the next power of 2.
+function nextPow2(n) { let p = 1; while (p < n) p <<= 1; return p; }
+function padPow2(I, w, h, P) {
+    const out = new Float32Array(P * P);
+    const x0 = (P - w) >> 1, y0 = (P - h) >> 1;
+    for (let y = 0; y < h; y++)
+        for (let x = 0; x < w; x++) out[(y0 + y) * P + (x0 + x)] = I[y * w + x];
+    return out;
+}
+
+function phaseCorrelationShift(a, b, w, h) {
+    // returns (dx, dy) such that b ≈ shift(a, dx, dy)
+    const P = nextPow2(Math.max(w, h));
+    const Are = padPow2(a, w, h, P), Aim = new Float32Array(P * P);
+    const Bre = padPow2(b, w, h, P), Bim = new Float32Array(P * P);
+    fft2d(Are, Aim, P, P, false);
+    fft2d(Bre, Bim, P, P, false);
+    const Rre = new Float32Array(P * P), Rim = new Float32Array(P * P);
+    for (let i = 0; i < Rre.length; i++) {
+        const re = Are[i] * Bre[i] + Aim[i] * Bim[i];
+        const im = Aim[i] * Bre[i] - Are[i] * Bim[i];
+        const m  = Math.hypot(re, im) || 1e-12;
+        Rre[i] = re / m; Rim[i] = im / m;
+    }
+    fft2d(Rre, Rim, P, P, true);
+    let pk = 0, pkVal = -Infinity;
+    for (let i = 0; i < Rre.length; i++) if (Rre[i] > pkVal) { pkVal = Rre[i]; pk = i; }
+    const py = (pk / P) | 0, px = pk - py * P;
+    function R(yy, xx) {
+        const yi = ((yy % P) + P) % P, xi = ((xx % P) + P) % P;
+        return Rre[yi * P + xi];
+    }
+    const ax = R(py, px - 1), bx = R(py, px), cx = R(py, px + 1);
+    const ay = R(py - 1, px), by = bx, cy = R(py + 1, px);
+    const dxden = ax - 2 * bx + cx, dyden = ay - 2 * by + cy;
+    const dx = dxden !== 0 ? 0.5 * (ax - cx) / dxden : 0;
+    const dy = dyden !== 0 ? 0.5 * (ay - cy) / dyden : 0;
+    let sx = px + dx, sy = py + dy;
+    if (sx > P / 2) sx -= P;
+    if (sy > P / 2) sy -= P;
+    return { dx: sx, dy: sy };
+}
+
+// Bicubic image-space shift (inverse-warp + boundary clamp). Avoids the
+// circular wrap-around of an FFT-based shift on a non-power-of-2 grid.
+function bicubicShift(I, w, h, dx, dy) {
+    function cubic(t) {
+        const a = -0.5, x = Math.abs(t);
+        if (x < 1) return ((a + 2) * x - (a + 3)) * x * x + 1;
+        if (x < 2) return (((x - 5) * x + 8) * x - 4) * a;
+        return 0;
+    }
+    const out = new Float32Array(I.length);
+    for (let y = 0; y < h; y++) {
+        const sy = y - dy;
+        const iy = Math.floor(sy), fy = sy - iy;
+        for (let x = 0; x < w; x++) {
+            const sx = x - dx;
+            const ix = Math.floor(sx), fx = sx - ix;
+            let s = 0, ws = 0;
+            for (let j = -1; j <= 2; j++) {
+                const yy = Math.max(0, Math.min(h - 1, iy + j));
+                const wy = cubic(j - fy);
+                for (let i = -1; i <= 2; i++) {
+                    const xx = Math.max(0, Math.min(w - 1, ix + i));
+                    const wx = cubic(i - fx) * wy;
+                    s += I[yy * w + xx] * wx; ws += wx;
+                }
+            }
+            out[y * w + x] = ws !== 0 ? Math.max(0, s / ws) : 0;
+        }
+    }
+    return out;
+}
+
+// =========================================================================
+//  Registration: refine (cx, cy) in source coords by phase correlation
+//  against the theoretical reference resized to side x side source pixels.
+//
+//  Uses the *full intensity* of both, so it locks onto structural features
+//  of an aberrated flattop (asymmetric lobes, ringing, dark spots) that a
+//  binary contour-based aligner would miss.
+// =========================================================================
+// Sub-pixel patch extraction: produce an N × N square centered at the
+// sub-pixel source coordinate (cx, cy), covering `side` source pixels, by
+// bicubic-sampling the source.  No integer-floor crop → no 1-px edge slop.
+// `outSize` defaults to round(side) for a 1:1 patch (registration); pass
+// 500 to combine crop+resample in one step (CNN input).
+function cropToPatch(I, w, h, cx, cy, side, outSize) {
+    const N = (outSize !== undefined && outSize !== null)
+        ? Math.max(8, Math.round(outSize))
+        : Math.max(8, Math.round(side));
+    const out = new Float32Array(N * N);
+    const step = side / N;
+    const halfN = N / 2;
+    // pixel-centre convention: patch index i ↔ source coord cx + (i - N/2)*step.
+    // Matching the convention used by detect_centre and resampleTo — see the
+    // long comment in the Python crop_centered for why an extra +0.5 inflates
+    // RMS_all at sharp edges (~5 % residue on the source==ref identity test).
+    for (let i = 0; i < N; i++) {
+        const sy = cy + (i - halfN) * step;
+        for (let j = 0; j < N; j++) {
+            const sx = cx + (j - halfN) * step;
+            out[i * N + j] = bicubicSample(I, w, h, sx, sy);
+        }
+    }
+    return { patch: out, N };
+}
+
+// Combined sub-pixel crop + resample to 500x500 — the CNN input.  Replaces
+// the old two-step (integer crop -> bicubic resize) with a single sub-pixel
+// resample so the source beam centroid lands at the registered (cx, cy)
+// down to fractional-pixel accuracy.
+function cropAndResample(I, w, h, cx, cy, side) {
+    return cropToPatch(I, w, h, cx, cy, side, TARGET).patch;
+}
+
+function registerToTemplate(I_src, srcW, srcH, theo500, cxInit, cyInit, side) {
+    const { patch, N } = cropToPatch(I_src, srcW, srcH, cxInit, cyInit, side);
+    if (N < 4) return { cx: cxInit, cy: cyInit, dx: 0, dy: 0 };
+
+    // Resize the 500x500 theoretical to N x N (bicubic)
+    const Ts = TARGET;
+    const theoResized = resampleTo(theo500, Ts, Ts, N, N);
+
+    // Peak-normalise both for phase correlation
+    const sp = normalisePeak(patch);
+    const tp = normalisePeak(theoResized);
+
+    // Phase correlation: returns the shift to apply to tp to align it with
+    // sp.  If sp's beam is offset from the patch centre by ε and tp's is
+    // centred, that shift IS +ε — the correction we add to (cx, cy).
+    let dx = 0, dy = 0;
+    try {
+        const s = phaseCorrelationShift(sp, tp, N, N);
+        dx = s.dx; dy = s.dy;
+    } catch (e) { /* keep zero */ }
+    return { cx: cxInit + dx, cy: cyInit + dy, dx, dy };
+}
+
+function normalisePeak(I) {
+    const m = maxOf(I); if (m <= 0) return I.slice();
+    const out = new Float32Array(I.length);
+    const inv = 1 / m;
+    for (let i = 0; i < I.length; i++) out[i] = I[i] * inv;
+    return out;
+}
+
+// =========================================================================
+//  RMS metrics — operate on RAW, background-subtracted source pixels.
+//  The experimental data is never smoothed nor rescaled.  Theoretical
+//  values come from a bicubic sub-pixel sample at each source pixel.
+// =========================================================================
+function computeRMSRaw(I_src, srcW, srcH, theo500, cx, cy, side, cxRef, cyRef) {
+    const Imax = maxOf(I_src);
+    const top = new Uint8Array(I_src.length);
+    const supp = new Uint8Array(I_src.length);
+    const diff = new Float32Array(I_src.length);
+
+    if (Imax <= 0) {
+        return { rms2d: NaN, rms2dRel: NaN, n2d: 0,
+                 rmsAll: NaN, rmsAllRel: NaN, nAll: 0,
+                 top, supp, diff };
+    }
+
+    // ---- RMS_2D on RAW source pixels (peak-normalised values) -----------
+    const inv = 1 / Imax;
+    let n2d = 0, sumV = 0;
+    for (let i = 0; i < I_src.length; i++) {
+        const v = I_src[i] * inv;
+        if (v >= 0.95) { top[i] = 1; sumV += v; n2d++; }
+    }
+    let rms2d = NaN, rms2dRel = NaN;
+    if (n2d) {
+        const mean2d = sumV / n2d;
+        let s = 0;
+        for (let i = 0; i < I_src.length; i++) if (top[i]) {
+            const d = I_src[i] * inv - mean2d; s += d * d;
+        }
+        rms2d = Math.sqrt(s / n2d);
+        rms2dRel = mean2d > 0 ? rms2d / mean2d : NaN;
+    }
+
+    // ---- RMS_all in source coords ---------------------------------------
+    // Inverse map: source pixel (x, y) ↔ sim coord (cxRef + (x - cx) * Ts/side, …).
+    // Using cxRef (rather than Ts/2) means: when (x, y) hits the source's
+    // beam centroid, the sim coord lands on the reference's beam centroid —
+    // so RMS_all is invariant to the reference's beam being off-centre.
+    const Ts = TARGET;
+    const tMax = maxOf(theo500); const tInv = 1 / Math.max(tMax, 1e-12);
+    const scale = Ts / side;     // sim px per src px
+    const half  = side / 2;
+    const x0 = Math.max(0, Math.floor(cx - half) - 1);
+    const x1 = Math.min(srcW, Math.ceil(cx + half) + 1);
+    const y0 = Math.max(0, Math.floor(cy - half) - 1);
+    const y1 = Math.min(srcH, Math.ceil(cy + half) + 1);
+    let nAll = 0, sumDiff = 0, sumRef = 0;
+    for (let y = y0; y < y1; y++) {
+        const sim_y = cyRef + (y - cy) * scale;
+        if (sim_y < 0 || sim_y > Ts - 1) continue;
+        for (let x = x0; x < x1; x++) {
+            const sim_x = cxRef + (x - cx) * scale;
+            if (sim_x < 0 || sim_x > Ts - 1) continue;
+            const t = bicubicSample(theo500, Ts, Ts, sim_x, sim_y) * tInv;
+            const e = I_src[y * srcW + x] * inv;
+            if (e >= 0.05 && t >= 0.05) {
+                const d = t - e;
+                sumDiff += d * d; sumRef += t; nAll++;
+                supp[y * srcW + x] = 1;
+                diff[y * srcW + x] = Math.abs(d);
+            }
+        }
+    }
+    let rmsAll = NaN, rmsAllRel = NaN;
+    if (nAll) {
+        rmsAll = Math.sqrt(sumDiff / nAll);
+        rmsAllRel = sumRef > 0 ? rmsAll / (sumRef / nAll) : NaN;
+    }
+
+    return { rms2d, rms2dRel, n2d, rmsAll, rmsAllRel, nAll, top, supp, diff };
+}
+
+// =========================================================================
+//  Horizontal cross-section through the beam centre — meaningful for any
+//  shape (bars, rectangles, asymmetric flattops) where a radial average is
+//  meaningless.  Returns the row at y = round(cy), one value per source x.
+// =========================================================================
+function horizontalSlice(I, w, h, cy) {
+    const cyi = Math.max(0, Math.min(h - 1, Math.round(cy)));
+    const out = new Float64Array(w);
+    const off = cyi * w;
+    for (let x = 0; x < w; x++) out[x] = I[off + x];
+    return out;
+}
+
+// =========================================================================
+//  Main run
+// =========================================================================
+async function runPipeline() {
+    if (!realData) return;
+    setStatus('running…', 'busy');
+    setStage('detecting centre');
+    await new Promise(r => setTimeout(r, 0));
+
+    const Ibs = backgroundSubtract(realData, realW, realH);
+    const det = detectCentre(realData, realW, realH);
+    if (!det) { setStatus('failed: empty image'); return; }
+
+    // If the user manually clicked a point, override the detected centre but
+    // keep the detector's bbox / r5 / support area.
+    let centre = { ...det };
+    if (manualCentre) { centre.cx = manualCentre.x; centre.cy = manualCentre.y; }
+
+    // ---- Choose crop side ----
+    const mode = $('mode').value;
+    const pad  = parseFloat($('pad').value);
+    let side;
+    if (mode === 'pixels') {
+        const v = parseFloat($('px').value);
+        if (!(v > 0)) { setStatus('enter a fixed-side value', 'warn'); return; }
+        side = v;
+    } else if (mode === 'halfside' || mode === 'radius') {  // 'radius' alias for back-compat
+        const v = parseFloat($('rad').value);
+        if (!(v > 0)) { setStatus('enter a half-side hint', 'warn'); return; }
+        side = 2 * v * pad;
+    } else {
+        // auto: prefer reference-aware area-ratio sizing (preserves sim
+        // framing); fall back to bbox * pad without a reference.  Math must
+        // use the *bg-subtracted* reference — see note in setRefImageFromImg.
+        if (refDataBs) {
+            const A_src = supportArea(gaussianSmooth(Ibs, realW, realH, 2.0),
+                                      realW, realH, 0.05);
+            const A_ref = supportArea(gaussianSmooth(refDataBs, TARGET, TARGET, 2.0),
+                                      TARGET, TARGET, 0.05);
+            if (A_src > 0 && A_ref > 0) {
+                side = TARGET * Math.sqrt(A_src / A_ref);
+            } else {
+                side = 2 * (centre.r5_bbox || 0.25 * Math.min(realW, realH)) * pad;
+            }
+        } else {
+            side = 2 * (centre.r5_bbox || 0.25 * Math.min(realW, realH)) * pad;
+        }
+    }
+    side = Math.max(8, side);
+
+    // The crop window is *always* centred on the detected centroid, so its
+    // centre coincides with the yellow 5%-bbox centre.  Phase-correlation
+    // template registration was previously applied here, but it can drift
+    // the centre away from the centroid for shape-mismatched cases (e.g.
+    // a tilted source bar against a horizontal reference): phase corr can't
+    // cancel rotation and instead picks a translation that maximises raw
+    // intensity overlap, which is misleading.  The detector's 3×3 parabolic
+    // refinement already gives sub-pixel centre accuracy, so registration
+    // is no longer needed.  Reference centre offset is now handled inside
+    // computeRMSRaw via the cx_ref-aware inverse map.
+    let cxUsed = centre.cx, cyUsed = centre.cy;
+    let regShift = { dx: 0, dy: 0 };
+
+    // Reference beam centroid (for cx_ref-aware inverse map in RMS_all).
+    let cxRef = TARGET / 2, cyRef = TARGET / 2;
+    if (refDataBs) {
+        const refCentre = detectCentre(refDataBs, TARGET, TARGET);
+        if (refCentre) { cxRef = refCentre.cx; cyRef = refCentre.cy; }
+    }
+
+    // ---- Crop + rescale to 500x500 (CNN input) ----
+    setStage('cropping & resampling');
+    await new Promise(r => setTimeout(r, 0));
+    const out500 = cropAndResample(Ibs, realW, realH, cxUsed, cyUsed, side);
+
+    lastCentre = { cx: cxUsed, cy: cyUsed, r5: centre.r5,
+                   r5_bbox: centre.r5_bbox, bbox: centre.bbox, side };
+    lastOutput = out500;
+    drawSourceFromLuma();
+    drawOutput();
+    drawProfile(horizontalSlice(Ibs, realW, realH, cyUsed),
+                Math.max(1e-12, maxOf(Ibs)),
+                cxUsed);
+
+    // ---- RMS metrics on RAW source pixels ----
+    if (refDataBs) {
+        setStage('computing RMS on raw source pixels');
+        await new Promise(r => setTimeout(r, 0));
+        const rms = computeRMSRaw(Ibs, realW, realH, refDataBs,
+                                  cxUsed, cyUsed, side, cxRef, cyRef);
+        // Visualise the source-coord top-band mask and the diff map (cropped
+        // to the beam region for clarity).
+        drawSrcMaskCrop(topCanvas,  rms.top,  realW, realH, cxUsed, cyUsed, side, [16, 185, 129]);
+        drawSrcDiffCrop(diffCanvas, rms.diff, realW, realH, cxUsed, cyUsed, side);
+
+        $('r-shift').textContent   = `(${(cxRef - TARGET / 2).toFixed(2)}, ${(cyRef - TARGET / 2).toFixed(2)})`;
+        $('r-rms2d').textContent   = isFinite(rms.rms2d)    ? rms.rms2d.toFixed(4)    : '—';
+        $('r-rms2dr').textContent  = isFinite(rms.rms2dRel) ? (100 * rms.rms2dRel).toFixed(2) + ' %' : '—';
+        $('r-rmsall').textContent  = isFinite(rms.rmsAll)   ? rms.rmsAll.toFixed(4)   : '—';
+        $('r-rmsallr').textContent = isFinite(rms.rmsAllRel)? (100 * rms.rmsAllRel).toFixed(2) + ' %' : '—';
+    } else {
+        $('r-shift').textContent = '—';
+        for (const id of ['r-rms2d', 'r-rms2dr', 'r-rmsall', 'r-rmsallr']) $(id).textContent = '—';
+    }
+
+    $('cc-lbl').textContent    = `(${cxUsed.toFixed(2)}, ${cyUsed.toFixed(2)})`;
+    $('r-centre').textContent  = `(${cxUsed.toFixed(2)}, ${cyUsed.toFixed(2)})`;
+    if (centre.bbox) {
+        const [bx0, by0, bx1, by1] = centre.bbox;
+        $('r-r5').textContent  = `${bx1 - bx0} × ${by1 - by0}`;
+    } else $('r-r5').textContent = '—';
+    $('r-side').textContent    = `${side.toFixed(2)}`;
+    $('r-rescale').textContent = `${(TARGET / side).toFixed(3)}× ↑/↓ to 500`;
+
+    $('download-btn').disabled = false;
+    setStatus('done', 'ok'); setStage('done');
+}
+
+// Display helpers: show source-coord masks and diff maps cropped to the
+// beam region.  Both render the source intensity as a dim grayscale
+// backdrop so the user sees *where in the source* the highlighted pixels
+// live — much clearer than a black-on-mask binary view.
+function drawSrcMaskCrop(canvas, mask, w, h, cx, cy, side, color) {
+    const N = Math.max(8, Math.round(side * 1.15));
+    const half = N / 2;
+    const x0 = Math.floor(cx - half), y0 = Math.floor(cy - half);
+    const srcMax = Math.max(1e-12, maxOf(realData));
+    canvas.width = N; canvas.height = N;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(N, N);
+    const d = img.data;
+    for (let yy = 0; yy < N; yy++) {
+        for (let xx = 0; xx < N; xx++) {
+            const sx = x0 + xx, sy = y0 + yy;
+            const j = (yy * N + xx) * 4;
+            if (sx < 0 || sy < 0 || sx >= w || sy >= h) {
+                d[j] = 5; d[j+1] = 10; d[j+2] = 22; d[j+3] = 255;
+            } else if (mask[sy * w + sx]) {
+                d[j] = color[0]; d[j+1] = color[1]; d[j+2] = color[2]; d[j+3] = 255;
+            } else {
+                // dim grayscale backdrop of the source intensity (× 0.45)
+                const g = Math.max(0, Math.min(255,
+                    Math.round((realData[sy * w + sx] / srcMax) * 255 * 0.45)));
+                d[j] = g; d[j+1] = g; d[j+2] = g; d[j+3] = 255;
+            }
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+}
+
+function drawSrcDiffCrop(canvas, diff, w, h, cx, cy, side) {
+    const N = Math.max(8, Math.round(side * 1.15));
+    const half = N / 2;
+    const x0 = Math.floor(cx - half), y0 = Math.floor(cy - half);
+    const srcMax = Math.max(1e-12, maxOf(realData));
+    // Find peak and mean diff in the cropped region for normalisation +
+    // a scale annotation.  Without the annotation the user can't tell
+    // whether the colours represent a 0.5 % or a 50 % residual — the canvas
+    // auto-scales either way.
+    let peak = 0, sumD = 0, nNz = 0;
+    for (let yy = 0; yy < N; yy++) {
+        for (let xx = 0; xx < N; xx++) {
+            const sx = x0 + xx, sy = y0 + yy;
+            if (sx >= 0 && sy >= 0 && sx < w && sy < h) {
+                const v = diff[sy * w + sx];
+                if (v > peak) peak = v;
+                if (v > 0) { sumD += v; nNz++; }
+            }
+        }
+    }
+    const meanDiff = nNz ? sumD / nNz : 0;
+    canvas.width = N; canvas.height = N;
+    const ctx = canvas.getContext('2d');
+    const img = ctx.createImageData(N, N);
+    const d = img.data;
+    const inv = 1 / Math.max(peak, 1e-12);
+    for (let yy = 0; yy < N; yy++) {
+        for (let xx = 0; xx < N; xx++) {
+            const sx = x0 + xx, sy = y0 + yy;
+            const j = (yy * N + xx) * 4;
+            if (sx < 0 || sy < 0 || sx >= w || sy >= h) {
+                d[j] = 5; d[j+1] = 10; d[j+2] = 22; d[j+3] = 255;
+                continue;
+            }
+            const v = diff[sy * w + sx];
+            if (v > 0) {
+                const t = Math.max(0, Math.min(1, v * inv));
+                const rgb = turbo(t);
+                d[j] = rgb[0]; d[j+1] = rgb[1]; d[j+2] = rgb[2]; d[j+3] = 255;
+            } else {
+                // dim grayscale backdrop showing the source pixel
+                const gv = Math.max(0, Math.min(255,
+                    Math.round((realData[sy * w + sx] / srcMax) * 255 * 0.45)));
+                d[j] = gv; d[j+1] = gv; d[j+2] = gv; d[j+3] = 255;
+            }
+        }
+    }
+    ctx.putImageData(img, 0, 0);
+
+    // Scale annotation: max and mean diff (peak-normalised).  Without this
+    // a user can't tell if the colours are amplified noise or a real error.
+    const fmt = v => (v < 0.001 ? v.toExponential(1) : v.toFixed(3));
+    const dpr = devicePixelRatio || 1;
+    const fontSize = Math.max(10, Math.round(N / 38)) * dpr;
+    const lineH = fontSize * 1.25;
+    ctx.save();
+    ctx.font = `${fontSize}px ui-monospace, Menlo, monospace`;
+    const txtMax  = `peak  Δ = ${fmt(peak)}`;
+    const txtMean = `mean Δ = ${fmt(meanDiff)}`;
+    const tw = Math.max(ctx.measureText(txtMax).width,
+                        ctx.measureText(txtMean).width);
+    const pad = 4 * dpr;
+    ctx.fillStyle = 'rgba(15, 23, 42, 0.78)';
+    ctx.fillRect(N - tw - pad * 3, N - lineH * 2 - pad * 2,
+                 tw + pad * 2, lineH * 2 + pad);
+    ctx.fillStyle = '#f8fafc';
+    ctx.textBaseline = 'top';
+    ctx.fillText(txtMax,  N - tw - pad * 2, N - lineH * 2 - pad);
+    ctx.fillText(txtMean, N - tw - pad * 2, N - lineH - pad);
+    ctx.restore();
+}
+
+// =========================================================================
+//  Wiring
+// =========================================================================
+function bindRange(id, lblId, fmt = v => v) {
+    const el = $(id), lbl = $(lblId);
+    if (lbl) lbl.textContent = fmt(el.value);
+    el.addEventListener('input', () => { if (lbl) lbl.textContent = fmt(el.value); });
+}
+bindRange('pad', 'pad-lbl', v => parseFloat(v).toFixed(2));
+
+$('mode').addEventListener('change', () => {
+    $('mode-lbl').textContent = $('mode').value;
+});
+
+$('real-upload').addEventListener('change', async e => {
+    const f = e.target.files?.[0]; if (!f) return;
+    $('real-name').textContent = f.name;
+    $('real-meta').textContent = formatBytes(f.size);
+    const url = URL.createObjectURL(f);
+    try {
+        const img = await loadImageURL(url);
+        await setRealImage(img);
+    } finally { URL.revokeObjectURL(url); }
+});
+
+$('ref-upload').addEventListener('change', async e => {
+    const f = e.target.files?.[0]; if (!f) return;
+    $('ref-name').textContent = f.name;
+    $('ref-meta').textContent = formatBytes(f.size);
+    const url = URL.createObjectURL(f);
+    try {
+        const img = await loadImageURL(url);
+        await setRefImageFromImg(img);
+    } finally { URL.revokeObjectURL(url); }
+});
+
+$('cx-manual').addEventListener('change', () => updateManualCentre());
+$('cy-manual').addEventListener('change', () => updateManualCentre());
+function updateManualCentre() {
+    const cx = parseFloat($('cx-manual').value);
+    const cy = parseFloat($('cy-manual').value);
+    if (isFinite(cx) && isFinite(cy)) {
+        manualCentre = { x: cx, y: cy };
+        if (lastCentre) {
+            lastCentre.cx = cx; lastCentre.cy = cy;
+            drawSourceOverlay();
+        }
+    }
+}
+$('reset-centre-btn').addEventListener('click', () => {
+    manualCentre = null;
+    $('cx-manual').value = ''; $('cy-manual').value = '';
+    setStatus('idle');
+});
+
+srcWrap.addEventListener('click', e => {
+    if (!realData) return;
+    const r = srcWrap.getBoundingClientRect();
+    const cx = (e.clientX - r.left) / r.width  * realW;
+    const cy = (e.clientY - r.top)  / r.height * realH;
+    manualCentre = { x: cx, y: cy };
+    $('cx-manual').value = cx.toFixed(1);
+    $('cy-manual').value = cy.toFixed(1);
+    if (!lastCentre) lastCentre = { cx, cy, r5: 0, bbox: null, side: 0 };
+    else { lastCentre.cx = cx; lastCentre.cy = cy; }
+    drawSourceOverlay();
+});
+srcWrap.addEventListener('mousemove', e => {
+    if (!realData) return;
+    const r = srcWrap.getBoundingClientRect();
+    const x = (e.clientX - r.left) / r.width  * realW;
+    const y = (e.clientY - r.top)  / r.height * realH;
+    $('src-hint').textContent = `${x.toFixed(0)}, ${y.toFixed(0)}`;
+});
+
+$('run-btn').addEventListener('click', runPipeline);
+$('download-btn').addEventListener('click', () => {
+    if (!lastOutput) return;
+    // Save exactly what the "500 × 500 cropped + rescaled" panel shows —
+    // a re-cropped slice of the *original* source bitmap with the registered
+    // (cx, cy, side).  This matches the panel's drawImage call so the
+    // downloaded file === the displayed image (turbo PNG stays turbo PNG,
+    // grayscale stays grayscale).  The Zernike corrector reconstructs luma
+    // from RGB on its end, so this is also CNN-compatible.
+    outCanvas.toBlob(b => {
+        if (!b) return;
+        const url = URL.createObjectURL(b);
+        const a = document.createElement('a');
+        a.href = url; a.download = 'crop_500x500.png'; a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 5000);
+    }, 'image/png');
+});
+
+function enableRun() { $('run-btn').disabled = !realData; }
+function formatBytes(n) {
+    if (n < 1024) return n + ' B';
+    if (n < 1048576) return (n / 1024).toFixed(1) + ' KB';
+    return (n / 1048576).toFixed(2) + ' MB';
+}
+
+// Try to load the default reference shipped in the repo.
+(async () => {
+    try {
+        const img = await loadImageURL(REF_DEFAULT);
+        await setRefImageFromImg(img);
+        $('ref-meta').textContent = `${img.naturalWidth}×${img.naturalHeight}`;
+    } catch (err) {
+        $('ref-name').textContent = '(no default — upload one to enable RMS)';
+        $('ref-meta').textContent = '—';
+    }
+})();
+</script>
+</body>
+</html>

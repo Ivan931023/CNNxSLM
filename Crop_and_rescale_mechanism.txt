@@ -1,0 +1,435 @@
+================================================================================
+                    Crop_and_rescale 完整運算原理與實作說明
+================================================================================
+
+目的
+----
+把一張任意大小、任意配色的真實 CCD 影像，自動裁切並 rescale 成 500×500
+的方形（CNN 預期的輸入尺寸），並與一張理論參考圖比對，計算兩種物理意義
+明確的 RMS 指標：
+  - RMS_2D：實驗 beam plateau（>= 95% 峰值）的均方根變動 — 平整度
+  - RMS_all：實驗與理論在共同 5% 支撐集上的均方根差異
+
+Simulation 訓練資料是用 cmap='turbo' 渲染的 500×500 PNG（見
+src/dataset_generator.py 第 139 行 plt.imsave(..., cmap='turbo')），所以
+CNN 的輸入必須與這個格式相容。本工具的所有運算都建立在「線性光強」上，
+而不是「灰階 luma」上 — 詳見第 1 節為何重要。
+
+
+================================================================================
+0. 全部 Pipeline 總覽
+================================================================================
+
+  Source PNG (任意尺寸、turbo 或 grayscale)
+        │
+        ▼ ① imageToLuma — 將 RGB → 線性光強 [0, 1]
+              (turbo 圖用 LUT 反演；灰階圖直接取 luma)
+  Float32 intensity 陣列 (H × W)
+        │
+        ▼ ② backgroundSubtract — 邊框 median 扣背景 (clip ≥ 0)
+  bg-subtracted intensity (Ibs)
+        │
+        ▼ ③ detectCentre — Gaussian smooth + Otsu/50%/5% threshold
+              + 最大連通元素加權重心 + 3×3 拋物線亞像素修正
+  (cx, cy, r5_bbox, bbox_5%) — 全部在 source pixel 座標
+        │
+        ▼ ④ 決定 crop side（auto / half-side / pixels 三種模式）
+              ref-aware: side = 500 · √(A_src / A_ref)
+              否則 fallback: side = 2 · max(W,H)_5%-bbox · pad
+        │
+        ▼ ⑤ cropToPatch — sub-pixel bicubic 採樣，
+              直接從 source 抽取 500×500 patch（不做兩階段）
+  500 × 500 luma (lastOutput, 給 CNN 用)
+        │
+        ▼ ⑥ computeRMSRaw — 在原始 source 像素上計算 RMS
+              使用 cx_ref-aware 反向映射採樣理論參考
+  RMS_2D, RMS_all + 視覺化用的 mask / diff
+
+下載按鈕直接從 outCanvas 抓 PNG（內含 ctx.drawImage 的原始 turbo 配色），
+所以下載檔 = 顯示面板，且 CNN 端會把 RGB 轉回 luma 比對訓練資料。
+
+
+================================================================================
+1. 影像載入與 Turbo 配色反演（最關鍵的一步）
+================================================================================
+
+矩陣乘法定義的 BT.601 luma：
+    L = 0.299 R + 0.587 G + 0.114 B
+
+對「灰階圖」L 就是線性光強的代表值（R=G=B=L），可以直接用。
+
+但對「turbo 配色」的 PNG 而言，luma 與真實光強之間並非單調映射：
+
+      線性光強 t       turbo(t) RGB           luma
+      ─────────────────────────────────────────────
+      0  (背景)        (48, 18, 59)  深紫     0.124
+      0.5 (中亮度)     (164, 252, 59) 黃綠   0.806  ← 最亮
+      1.0 (peak)       (122, 4, 3)   暗紅    0.154
+
+這代表：用 luma 算「>= 95% 最大值」的 mask 不會落在真正的 plateau，反而
+會落在 beam 邊緣的黃綠色區域；用 luma 計算質心也會偏向最亮 luma 的位置
+（即邊緣），不是真實 beam 中心。
+
+解法：建一張 256-entry turbo lookup table（足以對應 8-bit PNG 的 256
+個 t 解析度），對每個有色 RGB 像素以 nearest-neighbour 反查 t：
+
+    function invertTurbo(R, G, B):
+        d² 對 LUT 裡每一個 (Rₖ, Gₖ, Bₖ) 求最小，回傳 k / (N-1)
+
+判斷影像是否為灰階：抽樣約 2500 個像素，看是否每一個都滿足
+|R-G|, |G-B| ≤ 4。若是，按 luma 處理；若否，假設是 turbo 並反演。
+
+反演完每像素就是線性光強 t ∈ [0, 1]。後面所有運算都用這個值，意義才正確。
+
+
+================================================================================
+2. 背景扣除
+================================================================================
+
+estimate_background：
+  - 取距邊緣 4% 寬度的環狀邊框（例如 2592×1944 影像取 ~78 px 寬的 ring）
+  - 計算這 ring 裡所有 pixel 的中位數 → 背景值 bg
+  - 為何中位數而非平均：beam 若意外進入 ring 會把平均拉高，中位數對亮
+    outlier 免疫。
+
+backgroundSubtract：
+  Ibs(x, y) = clip(I(x, y) − bg, 0, ∞)
+
+對 turbo 影像而言（已反演成線性光強），背景幾乎是 0，bg ≈ 0，本步驟
+近乎 no-op；對直接從 CCD 拿到、有底噪的灰階影像則必要。
+
+
+================================================================================
+3. Beam 中心偵測（detectCentre）
+================================================================================
+
+兩階段：粗定位 + 亞像素細修。Smoothing 只用在「找中心」，不會影響後續
+RMS 計算（user 明確要求 RMS 必須用未經 smooth 的原始 source pixel）。
+
+(a) Gaussian smooth：σ = 2 px（離散卷積核 7-tap）— 抑制高頻雜訊。
+
+(b) Threshold = max(Otsu, 50% × Imax, 5% × Imax)
+     - Otsu：類間變異最大化，自動決定門檻
+     - 50%：對 flattop 最有效，把 plateau 與底噪一刀切開
+     - 5%：當 Otsu 與 50% 都失準時（極低對比）的下限
+     最後取三者最大值 → 最保守的決策
+
+(c) 最大連通元素（4-connected flood fill）
+     門檻以上的二值 mask 找出最大那塊，把雜訊噪點丟掉，只留下「真正的
+     beam」那塊。對非圓形（長條 flattop、有 ring 的高斯）一樣有效。
+
+(d) 強度加權重心
+     cx₀ = Σ x · I(x, y) / Σ I    (僅對 mask 內的像素)
+     cy₀ = Σ y · I(x, y) / Σ I
+
+(e) 3×3 拋物線亞像素細修
+     在 (round(cx₀), round(cy₀)) 周圍取 3 個鄰居，用一維拋物線頂點公式：
+        dx = 0.5 · (a − c) / (a − 2b + c)        其中 a, b, c 是左/中/右強度
+        cx = round(cx₀) + dx (限制在 ±1 內)
+     對 y 軸獨立做一次。
+     可達 ~0.05 px 精度，對後續 rescale 後的物理對齊很重要。
+
+(f) 5%-bbox（5%-輪廓矩形外接）
+     另外計算 mask5 = (Is ≥ 0.05 × Imax)，找最大連通元素的 axis-aligned
+     bbox：(x0, y0, x1, y1)
+     - radius_5pct_bbox = max(W, H) / 2 — 用於非圓形 auto sizing 的 fallback
+     - 不取對角線而取 max(W, H) — 確保長條形 beam 整個進得去方框
+
+回傳：
+   { cx, cy, r5_diag, r5_bbox, bbox=[x0,y0,x1,y1], method }
+
+
+================================================================================
+4. Crop side 決策（三種模式）
+================================================================================
+
+Side（裁切方塊邊長，src px 單位）的三種算法：
+
+(a) auto · ref-aware framing（預設、推薦）
+    需要有理論 reference。算源與參考的 5% 支撐集 pixel 數 A_src、A_ref
+    （都先 Gaussian smooth σ=2 後再 threshold，僅用於 mask 計算）：
+
+       side = 500 · √(A_src / A_ref)
+
+    幾何意義：保證 source 的 beam 在最後的 500×500 中佔據的相對面積 =
+    reference 中佔據的相對面積。換言之，我們在「保留 simulation framing」
+    — CNN 訓練時看到的 beam 在 500×500 中佔多少比例，輸出就佔多少比例。
+
+(b) auto fallback（沒有 reference 時）
+       side = 2 · radius_5pct_bbox · pad         (pad 預設 1.10)
+
+    將 beam 5%-輪廓的最大邊長乘以 pad 當邊長，beam 幾乎填滿輸出。
+
+(c) half-side hint
+       side = 2 · hint · pad
+
+    user 自行輸入 half-side（src px）。Gaussian beam：用 Calibration.html
+    量出 1/e² 半徑當 hint。長條 flattop：用 max(W, H)/2 當 hint。
+
+(d) pixels（手動）
+       side = (使用者輸入)
+    完全覆蓋自動邏輯。debug 或對齊兩張 CCD 的同一物理範圍時用。
+
+side 取 max(8, side) 作為下限。
+
+
+================================================================================
+5. 子像素 Crop + Resample（cropToPatch）
+================================================================================
+
+舊作法分兩步：先用 floor() 切整數像素 patch，再 bicubic resize。問題是
+floor() 會在 sub-pixel cx 上引入最多 1 px 的偏差，phase correlation 會
+忠實地把這個偏差當成真實位移補進來，最後造成 RMS_all 在 identity test
+（source = ref）上殘留 ~5% 的虛假誤差。
+
+新作法：把 crop 與 resize 合併成單一個 sub-pixel 採樣操作，從 source
+直接 bicubic 採樣到 500×500：
+
+    輸出像素 (i, j) 對應的 source 座標：
+        src_x(j) = cx + (j − N/2) · (side / N)
+        src_y(i) = cy + (i − N/2) · (side / N)
+    out(i, j) = bicubicSample(I, src_x, src_y)
+
+bicubic kernel 用 Catmull-Rom（a = -0.5）：
+    cubic(t) = ((a+2)|t|³ − (a+3)|t|² + 1)            for |t| < 1
+             = a|t|³ − 5a|t|² + 8a|t| − 4a            for 1 ≤ |t| < 2
+             = 0                                       otherwise
+
+注意：是 (j − N/2) 而非 (j + 0.5 − N/2)，因為要對齊 detect_centre 的
+像素中心慣例（pixel j 的中心位於座標 j）— 加 0.5 會在 sharp 邊緣引入
+~5% 的虛假 RMS_all 殘留，已透過 source = ref 的 identity 測試驗證。
+
+採樣超出 source 邊界的位置直接補 0（zero-pad）。
+
+
+================================================================================
+6. RMS_2D：plateau 平整度
+================================================================================
+
+定義（在「原始」bg-subtracted source pixel 上計算，不 smooth、不 rescale）：
+
+    Imax = max(Ibs(x, y))                    # 整張 source 的最大值
+    mask_top = { (x, y) : Ibs(x, y) ≥ 0.95 · Imax }
+    μ = mean(Ibs[mask_top]) / Imax           # 峰值正規化後的平均
+
+    RMS_2D = √( mean( (Ibs/Imax − μ)² )  ) 在 mask_top 內
+    RMS_2D_relative = RMS_2D / μ             # 變異係數，常用平整度指標
+
+物理意義：
+  - 對完美 flattop：plateau 全部 = peak，RMS_2D = 0
+  - 對 Gaussian beam：plateau 是尖峰附近的小區域，RMS_2D ≈ 一個值
+  - 對 rippled / 像差 flattop：plateau 上下震盪，RMS_2D 顯著
+
+關鍵：因為輸入經 turbo 反演成線性光強，「>= 95% Imax」真的對應 plateau，
+而不是 turbo 的黃綠色邊緣。
+
+
+================================================================================
+7. RMS_all：與理論的 plateau 對齊差異
+================================================================================
+
+設計目標：給定 source 與 reference，在「兩者 5% 支撐集的交集」上計算
+峰值正規化後的均方根差異。實驗側永遠是原始 source pixel；理論側透過
+反向映射做 sub-pixel bicubic 採樣到 source pixel 座標 — 不對 source
+做任何 smooth 或 rescale。
+
+(a) 反向映射（cx_ref-aware）
+
+    Reference 的 beam 中心（reference 也跑一次 detectCentre）：
+        (cx_ref, cy_ref)        # 例如 ideal_flattop.png 是 (249.01, 248.99)
+
+    對 source 像素 (x, y) 求對應的 sim 座標：
+        sim_x = cx_ref + (x − cx_src) · Ts / side
+        sim_y = cy_ref + (y − cy_src) · Ts / side
+
+    其中 (cx_src, cy_src) 是 source 上偵測到的 beam 中心，Ts = 500。
+    幾何意義：source 的 beam 中心 (cx_src, cy_src) 會對應到 sim 的 beam
+    中心 (cx_ref, cy_ref) — 兩個 beam 的中心被「對齊」到彼此。
+
+    若 reference 的 beam 不在 (250, 250) 而在 (249, 249)，這個 cx_ref-
+    aware 公式自動補償；舊版用 Ts/2 取代 cx_ref，會在 reference 不對稱
+    時引入 1 px 的 bias，造成 source = ref 的 identity test 出現 9.35%
+    虛假殘差。
+
+(b) 採樣理論
+
+    I_theo(x, y) = bicubicSample(theo_500, sim_x, sim_y)
+    若 sim_x 或 sim_y 超出 [0, Ts−1] → 視為超出支撐集，跳過該像素。
+
+(c) 共同支撐集
+
+    Eᵐᵃˣ = max(Ibs)，Tᵐᵃˣ = max(theo_500)：
+       in_src  = Ibs(x, y) / Eᵐᵃˣ ≥ 0.05
+       in_theo = I_theo(x, y) / Tᵐᵃˣ ≥ 0.05
+       support = in_src AND in_theo
+
+(d) RMS
+
+    只在 support 集合內加總：
+       diff(x, y) = I_theo(x, y)/Tᵐᵃˣ − Ibs(x, y)/Eᵐᵃˣ
+       RMS_all = √( mean(diff²) )
+       RMS_all_relative = RMS_all / mean(I_theo[support]/Tᵐᵃˣ)
+
+     diff 是峰值正規化後的差異，不受曝光時間影響。
+
+(e) 為什麼不需要 phase-correlation registration？
+
+    我們之前用 phase correlation 在 source patch 與 resized reference
+    之間找 sub-pixel 平移補償。對 source = ref 的 identity test 它能
+    把 RMS_all 從 9.35% 降到 0.05%，但對 shape 不一致的情況（例如
+    source 的 bar 旋轉了 15° 而 reference 是水平）它會災難性地把中心
+    位置「平移」到一個不該有的位置 — 因為 phase corr 無法消除旋轉，
+    它會挑選一個讓 source 與 reference 的亮區重疊面積最大的平移，
+    而那個平移會使裁切視窗偏離 beam 中心。
+
+    解法（目前的版本）：完全不做 phase correlation，crop 中心一律用
+    detected centroid。Sub-pixel 精度由：
+      - detect_centre 的 3×3 拋物線亞像素細修（~0.05 px）
+      - cropToPatch 的子像素 bicubic 採樣（消除 integer-floor 殘差）
+      - cx_ref-aware 反向映射（消除 reference 不對稱的偏差）
+    三項協同確保 identity test 給 RMS_all = 0.0000%（驗證通過）。
+
+    對 rotation / scale 不一致的真實 beam，RMS_all 會回應這個物理上
+    無法用平移補償的差異 — 數字偏大但是物理意義明確；舊版 phase corr
+    會「藏」掉這個差異（給出視覺上錯誤但數字小的結果），現在版本誠實
+    地反映出來。
+
+
+================================================================================
+8. 視覺化（Live visualisation 三張主圖 + 兩張子圖 + cross-section）
+================================================================================
+
+(a) Source 面板
+    用 ctx.drawImage(realImage, 0, 0) 直接渲染原 PNG —— 保留原配色。
+    Overlay canvas 上畫：
+      - 紅色 +：detected centroid (cx, cy)
+      - 黃色虛線方框：5%-mask 的 axis-aligned bbox
+      - 綠色實線方框：crop window，邊長 side、中心 (cx, cy)
+    黃框與綠框 share 同一個 centre（紅 + 標註），方便目測判斷裁切是否
+    對到 beam。
+
+(b) 500×500 cropped + rescaled 面板
+    ctx.drawImage(realImage, srcRect, dstRect)：用瀏覽器原生 scaling
+    把 source 上的 (cx − side/2, cy − side/2, side, side) 矩形重畫到
+    500×500。配色完全等於 source（turbo 來、turbo 去）。下載按鈕直接
+    抓這個 canvas 為 PNG，所以下載 = 顯示。
+
+(c) Reference (500×500) 面板
+    類似 (b)，drawImage 原 PNG。
+
+(d) Top-band mask（在 source 座標下、cropped 顯示）
+    顯示 RMS_2D 的 mask：≥ 95% × Iᵐᵃˣ 的位置上色（綠色），其餘暗灰色
+    為 source 的縮小灰階背景，可以看到 mask 確實落在 plateau 上。
+
+(e) |I_theo − I_src| (5% support)（在 source 座標下、cropped 顯示）
+    支撐集內的 diff 用 turbo colormap 顯示，外部留 source 的暗灰色背景。
+    右下角標 peak Δ 與 mean Δ — 因為 canvas auto-scale 到區域最大值，
+    若不附 scale 標籤，user 無法判斷顏色到底代表 0.5% 還是 50% 殘差。
+
+(f) Source — horizontal cross-section through centre (y = cy)
+    在 source 第 round(cy) 列做水平切片，畫 I/Iᵐᵃˣ vs x。
+    輔助線：
+      - 黃色 5% 水平虛線
+      - 紅色 cx 垂直虛線
+    對 flattop 應該看到一個清楚的 plateau，從上升前緣穿越到下降後緣。
+    若曾經看到「兩個尖峰」而不是 plateau —— 那是 turbo→luma 的非單調
+    映射造成的，用線性光強就會回到正確的 plateau 形狀。
+
+
+================================================================================
+9. Calibration report 各欄位意義
+================================================================================
+
+  Source resolution           : 上傳的 CCD 影像原始尺寸 W × H
+  Detected centre (src px)    : detectCentre 找到的 (cx, cy)，單位 src px
+  5%-bbox (W × H, src px)     : 5%-mask 的 axis-aligned bbox 寬與高
+  Crop side (src px)          : 裁切方塊的邊長
+  Resample factor             : 500 / side — > 1 表上採樣，< 1 表下採樣
+  Reference centre offset     : (cx_ref − 250, cy_ref − 250)，sim px
+                                顯示理論 beam 在 500×500 frame 中偏離
+                                幾何中心多少。對 ideal_flattop ≈ (-1, -1)
+  RMS_2D (≥ 95% Iᵐᵃˣ)         : plateau 絕對 σ（峰值正規化）
+  RMS_2D relative (σ / μ)     : 變異係數，平整度的工業指標
+  RMS_all (5% support)        : 與理論的 RMS 差異（峰值正規化）
+  RMS_all relative            : 同上但除以 mean(I_theo on support)
+
+
+================================================================================
+10. 與 CNN 的相容性
+================================================================================
+
+src/dataset_generator.py 用 plt.imsave(..., cmap='turbo') 把模擬出的
+500×500 線性光強存成 turbo PNG。CNN（Zernike_aberrators_corrector.html
+第 706–712 行）讀 PNG → 計算 luma → 餵入網路。所以 CNN 訓練資料其實是
+「turbo 渲染後的 luma」，這是非單調的。
+
+我們下載的 PNG 直接從 outCanvas 抓（canvas 內容是 ctx.drawImage 出來
+的原 PNG cropped + rescaled），所以：
+  - 上傳 turbo PNG → 下載也是 turbo PNG → CNN 端 luma → 與訓練資料同格式 ✓
+  - 上傳 grayscale PNG → 下載也是 grayscale → CNN 端 luma = 線性光強
+    （與訓練資料的「turbo 後 luma」不同，但若 CNN 模型有泛化性，仍能用）
+
+最佳作法：將真實 CCD 線性光強用 plt.imsave(cmap='turbo') 包一層後再
+餵到本工具，可以完全模擬訓練資料的編碼路徑。
+
+
+================================================================================
+11. 已驗證的測試案例
+================================================================================
+
+(1) Identity test：source = reference = ideal_flattop.png
+    Detected centre   : (249.01, 248.99)
+    Used centre       : (249.01, 248.99)        ← 等於 detected，無 shift
+    Side              : 500.000
+    RMS_2D            : 1.23%   (ideal_flattop 自身有 ~1% 不平整)
+    RMS_all           : 0.0000% ✓               ← 完美 identity
+
+(2) 合成非圓形 flattop in 2592 × 1944
+    Beam 真實位置     : (1340.7, 982.3)
+    Detected centre   : (1340.0, 981.8)         ← <1 px 誤差
+    Auto side         : 421                     ← 真實值 420，0.2% 誤差
+    RMS_2D            : 1.06%
+    RMS_all           : 4.5%                    ← 反映 noise + 編碼殘差
+
+
+================================================================================
+12. 使用建議
+================================================================================
+
+(1) Reference 一律建議上傳。沒有 reference 時 auto sizing 改用 bbox×pad，
+    但 RMS metrics 不會計算。
+
+(2) 對非圓形 beam（長條、矩形 flattop），auto 模式仍正確 — 用 5%-mask
+    面積比率與形狀無關。
+
+(3) 若 detect_centre 把中心抓錯（極低 SNR、bg 不均勻），可以直接在
+    source canvas 上點一下 manual override，再按 Run。
+
+(4) 若 source 與 reference 的 beam 形狀差異很大（例如旋轉、scale 不
+    匹配），RMS_all 會顯示這個物理差異 — 這是正確行為，不要試圖去
+    「修平」它。要修，先在光學系統端對齊 / 縮放，或在 reference 端也
+    產生對應的 aberration 圖樣。
+
+(5) 量 beam 大小用 Calibration.html，量到 1/e² waist 後可以塞到
+    half-side hint 模式。對 Gaussian beam 最準。
+
+
+================================================================================
+程式碼對照
+================================================================================
+
+  src/crop_and_rescale.py   ：library + CLI 版本，所有運算與下方一致
+  Crop_and_rescale.html     ：純 JS port，可直接用瀏覽器打開（無需 server）
+
+主要對應函式：
+  Python                          JS
+  ───────────────────────────────────────────────────────────────
+  load_intensity                  imageToLuma          (含 turbo 反演)
+  background_subtracted           backgroundSubtract
+  detect_centre                   detectCentre
+  _support_area                   supportArea
+  crop_centered                   cropToPatch          (sub-pixel)
+  compute_rms_raw                 computeRMSRaw        (cx_ref-aware)
+  run                             runPipeline
+
+================================================================================
