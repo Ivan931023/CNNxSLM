@@ -1,0 +1,1187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SLM Calibration Simulator · Centre + Beam Size · v2</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --panel-bg: rgba(30, 41, 59, 0.7);
+            --primary: #38bdf8;
+            --secondary: #8b5cf6;
+            --accent: #10b981;
+            --warn: #fbbf24;
+            --danger: #ef4444;
+            --text: #f8fafc;
+            --text-muted: #94a3b8;
+            --border: rgba(255, 255, 255, 0.1);
+            --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        }
+        * { box-sizing: border-box; }
+        html, body { width: 100%; }
+        body {
+            margin: 0; padding: 1.5rem 1rem 3rem;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background: var(--bg-color);
+            background-image:
+                radial-gradient(circle at 15% 50%, rgba(56, 189, 248, 0.15), transparent 25%),
+                radial-gradient(circle at 85% 30%, rgba(139, 92, 246, 0.15), transparent 25%);
+            color: var(--text);
+            min-height: 100vh;
+        }
+        .header { text-align: center; margin-bottom: 1.4rem; }
+        .header h1 {
+            font-size: 2.1rem; margin: 0;
+            background: linear-gradient(to right, #38bdf8, #8b5cf6);
+            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+        }
+        .header p { color: var(--text-muted); margin: 0.4rem 0 0; font-size: 0.95rem; }
+        .badge {
+            display: inline-block; padding: 0.2rem 0.7rem; border-radius: 9999px;
+            font-size: 0.78rem; font-weight: 600;
+            background: rgba(16, 185, 129, 0.18); color: var(--accent); margin-bottom: 0.55rem;
+        }
+
+        .container {
+            max-width: 1400px; margin: 0 auto;
+            display: grid; gap: 1.1rem;
+        }
+        .panel {
+            background: var(--panel-bg);
+            backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--border); border-radius: 16px;
+            padding: 1.25rem 1.4rem;
+            box-shadow: 0 4px 6px -1px rgba(0,0,0,0.1);
+        }
+        .panel-title {
+            font-size: 1.05rem; font-weight: 600;
+            margin: 0 0 0.95rem;
+            border-bottom: 1px solid var(--border); padding-bottom: 0.55rem;
+            display: flex; align-items: center; justify-content: space-between;
+            gap: 0.75rem; flex-wrap: wrap;
+        }
+
+        /* ==== Setup grid ==== */
+        .setup-grid {
+            display: grid;
+            grid-template-columns: 1.25fr 1fr 1fr 1fr;
+            gap: 1.05rem;
+        }
+        @media (max-width: 1100px) { .setup-grid { grid-template-columns: 1fr 1fr; } }
+        @media (max-width: 600px)  { .setup-grid { grid-template-columns: 1fr; } }
+
+        .field { display: flex; flex-direction: column; gap: 0.4rem; min-width: 0; }
+        .field-label {
+            display: flex; justify-content: space-between; align-items: baseline;
+            font-size: 0.78rem; color: var(--text-muted);
+        }
+        .field-label .val {
+            font-family: var(--mono); color: var(--primary);
+            min-width: 3.6em; text-align: right;
+            font-variant-numeric: tabular-nums;
+        }
+        .field-label .val.wide { min-width: 5em; }
+        .field input[type="range"] {
+            -webkit-appearance: none; appearance: none;
+            width: 100%; height: 6px; margin: 0;
+            background: rgba(255,255,255,0.08);
+            border-radius: 999px;
+            box-sizing: border-box;
+        }
+        .field input[type="range"]::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            width: 16px; height: 16px; border-radius: 50%;
+            background: var(--primary);
+            box-shadow: 0 0 8px rgba(56,189,248,0.5);
+            cursor: pointer; border: none;
+        }
+        .field input[type="range"]::-moz-range-thumb {
+            width: 16px; height: 16px; border-radius: 50%;
+            background: var(--primary); border: none;
+            box-shadow: 0 0 8px rgba(56,189,248,0.5); cursor: pointer;
+        }
+
+        .field .row { display: flex; align-items: center; gap: 0.5rem; }
+        .field input[type="number"] {
+            background: rgba(0, 0, 0, 0.32); border: 1px solid var(--border);
+            color: var(--text); border-radius: 6px;
+            padding: 0.32rem 0.45rem; font-size: 0.82rem;
+            font-family: var(--mono); text-align: right;
+            width: 7.5em; min-width: 0;
+        }
+        .field input[type="number"]:focus { outline: none; border-color: var(--primary); }
+        .axis-tag { font-size: 0.78rem; color: var(--text-muted); width: 0.9rem; text-align: center; }
+
+        .btn-row { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+        .btn {
+            border: none; padding: 0.55rem 0.9rem; border-radius: 8px;
+            font-weight: 600; font-size: 0.85rem; cursor: pointer;
+            transition: transform 0.15s, opacity 0.15s, box-shadow 0.15s;
+        }
+        .btn:hover:not(:disabled) { transform: translateY(-1px); }
+        .btn:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+        .btn-primary {
+            background: linear-gradient(135deg, var(--primary), var(--secondary));
+            color: #fff; box-shadow: 0 4px 12px -4px rgba(56, 189, 248, 0.5); flex: 1;
+        }
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.06); color: var(--text);
+            border: 1px solid var(--border);
+        }
+        .btn-tiny {
+            background: rgba(255, 255, 255, 0.05); color: var(--text-muted);
+            border: 1px solid var(--border);
+            padding: 0.4rem 0.65rem; font-size: 0.78rem;
+        }
+
+        .pill-row { display: flex; gap: 0.45rem; flex-wrap: wrap; }
+        .pill {
+            display: inline-flex; align-items: center; gap: 0.4rem;
+            padding: 0.3rem 0.65rem; border-radius: 999px;
+            background: rgba(15, 23, 42, 0.55); border: 1px solid var(--border);
+            color: var(--text-muted); font-size: 0.76rem;
+            font-family: var(--mono);
+        }
+        .pill .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-muted); }
+        .pill.busy .dot { background: var(--primary); animation: pulse 1.2s infinite; }
+        .pill.ok .dot   { background: var(--accent); }
+        @keyframes pulse { 50% { opacity: 0.4; } }
+
+        /* ==== Visualisation ==== */
+        .vis-grid { display: grid; gap: 1rem; }
+        .canvas-wrap {
+            position: relative;
+            border-radius: 12px; overflow: hidden;
+            background: #000; border: 1px solid var(--border);
+            aspect-ratio: 1920 / 1080;
+            cursor: crosshair;
+            width: 100%;
+        }
+        .canvas-wrap canvas {
+            position: absolute; top: 0; left: 0;
+            width: 100%; height: 100%;
+            display: block; image-rendering: pixelated;
+        }
+        .stage-label {
+            position: absolute; top: 10px; left: 10px;
+            font-size: 0.78rem; font-weight: 600;
+            background: rgba(15, 23, 42, 0.8); color: var(--primary);
+            padding: 0.3rem 0.7rem; border-radius: 6px;
+            border: 1px solid var(--border); font-family: var(--mono);
+        }
+        .canvas-hint {
+            position: absolute; right: 10px; bottom: 10px;
+            font-size: 0.74rem; color: var(--text-muted);
+            background: rgba(0,0,0,0.55); padding: 0.25rem 0.55rem;
+            border-radius: 6px; pointer-events: none; font-family: var(--mono);
+        }
+        .progress-bar {
+            position: absolute; left: 0; right: 0; bottom: 0;
+            height: 3px; background: rgba(255,255,255,0.06);
+        }
+        .progress-bar > div {
+            height: 100%; width: 0%;
+            background: linear-gradient(90deg, var(--accent), var(--primary));
+            transition: width 0.1s linear;
+        }
+
+        .mini-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 1rem;
+        }
+        @media (max-width: 800px) { .mini-grid { grid-template-columns: 1fr; } }
+
+        .mini-card {
+            background: rgba(0, 0, 0, 0.28); border: 1px solid var(--border);
+            border-radius: 12px; padding: 0.85rem 0.95rem;
+            display: flex; flex-direction: column;
+        }
+        .mini-card .title {
+            font-size: 0.82rem; font-weight: 600; color: var(--text-muted);
+            margin: 0 0 0.6rem; display: flex; justify-content: space-between;
+            align-items: baseline; gap: 0.5rem;
+        }
+        .mini-card .title .val { color: var(--primary); font-family: var(--mono); font-size: 0.8rem; }
+        .mini-card canvas {
+            width: 100%; aspect-ratio: 16 / 9;
+            background: #050a16; border-radius: 8px; display: block;
+        }
+        .mini-card.square canvas { aspect-ratio: 1 / 1; max-width: 100%; align-self: center; }
+
+        /* ==== Report ==== */
+        .report {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 0.7rem;
+        }
+        .report .item {
+            background: rgba(0,0,0,0.3); border: 1px solid var(--border);
+            border-radius: 10px; padding: 0.7rem 0.85rem;
+            display: flex; flex-direction: column; gap: 0.25rem;
+        }
+        .report .item .lbl { font-size: 0.72rem; color: var(--text-muted); }
+        .report .item .val {
+            font-family: var(--mono); font-size: 1rem;
+            font-variant-numeric: tabular-nums;
+        }
+        .val.ok { color: var(--accent); }
+        .val.warn { color: var(--warn); }
+
+        details {
+            border: 1px solid var(--border); border-radius: 10px;
+            padding: 0.7rem 0.95rem; background: rgba(0,0,0,0.18);
+            margin-top: 0.6rem;
+        }
+        details summary {
+            cursor: pointer; font-weight: 600; color: var(--text); font-size: 0.92rem;
+        }
+        details p, details ul {
+            color: var(--text-muted); font-size: 0.85rem; line-height: 1.6;
+        }
+        details code {
+            background: rgba(255,255,255,0.06); padding: 1px 5px; border-radius: 4px;
+            font-family: var(--mono); font-size: 0.83rem;
+        }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="badge">SLM 1920 × 1080 · centre + 1/e² beam-size</div>
+    <h1>Calibration Simulator</h1>
+    <p>Click anywhere on the SLM canvas to seed the unknown beam — the algorithm finds its centre, then sizes it.</p>
+</div>
+
+<div class="container">
+
+    <!-- ============ Setup ============ -->
+    <div class="panel">
+        <h2 class="panel-title">
+            <span>Setup &amp; control</span>
+            <span class="pill-row">
+                <span class="pill" id="status-pill"><span class="dot"></span><span id="status-text">idle</span></span>
+                <span class="pill"><span style="color:var(--text)">SLM</span> 1920 × 1080</span>
+            </span>
+        </h2>
+
+        <div class="setup-grid">
+            <div class="field">
+                <span class="field-label"><span>True beam centre (click on SLM canvas)</span></span>
+                <div class="row">
+                    <span class="axis-tag">x</span>
+                    <input type="number" id="cx" value="1100" step="0.1" min="0" max="1920">
+                    <span class="axis-tag">y</span>
+                    <input type="number" id="cy" value="540" step="0.1" min="0" max="1080">
+                    <button class="btn btn-tiny" id="random-btn" title="Randomise centre">⟳</button>
+                </div>
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Beam waist w₀ (1/e² radius)</span>
+                    <span class="val" id="w0-lbl">375</span>
+                </span>
+                <input type="range" id="w0" min="120" max="500" value="375" step="5">
+            </div>
+
+            <div class="field">
+                <span class="field-label"><span>Stage 1 — coarse step</span><span class="val" id="cs-lbl">50</span></span>
+                <input type="range" id="coarse-step" min="20" max="120" value="50" step="2">
+
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Stage 2 — fine step</span><span class="val" id="fs-lbl">2</span></span>
+                <input type="range" id="fine-step" min="1" max="6" value="2" step="1">
+
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Stage 2 — R<sub>spot</sub></span><span class="val" id="rs-lbl">50</span></span>
+                <input type="range" id="r-spot" min="20" max="120" value="50" step="2">
+            </div>
+
+            <div class="field">
+                <span class="field-label"><span>Stage 3 — radius step ΔR</span><span class="val" id="dr-lbl">20</span></span>
+                <input type="range" id="dr" min="5" max="50" value="20" step="5">
+
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Stage 3 — max radius</span><span class="val wide" id="rmax-lbl">auto</span></span>
+                <input type="range" id="rmax" min="0" max="800" value="0" step="10">
+
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Animation speed</span><span class="val" id="sp-lbl">fast</span></span>
+                <input type="range" id="speed" min="0" max="100" value="78" step="1">
+            </div>
+
+            <div class="field" style="justify-content:flex-end">
+                <div class="btn-row">
+                    <button class="btn btn-primary" id="run-btn">▶ Run calibration</button>
+                    <button class="btn btn-secondary" id="reset-btn">Reset</button>
+                </div>
+                <span class="field-label" style="margin-top:0.4rem">
+                    <span>Tip: <code style="background:rgba(255,255,255,.08);padding:1px 5px;border-radius:4px">Shift</code>+click also bumps w₀.</span>
+                </span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Visualisation ============ -->
+    <div class="panel">
+        <h2 class="panel-title">
+            <span>Live visualisation</span>
+            <span class="pill-row">
+                <span class="pill"><span class="dot" style="background:#ef4444"></span>true</span>
+                <span class="pill"><span class="dot" style="background:#fbbf24"></span>coarse</span>
+                <span class="pill"><span class="dot" style="background:#10b981"></span>final</span>
+                <span class="pill"><span class="dot" style="background:#ec4899"></span>1/e² ring</span>
+            </span>
+        </h2>
+
+        <div class="vis-grid">
+            <div class="canvas-wrap" id="slm-wrap">
+                <canvas id="beam-canvas"></canvas>
+                <canvas id="overlay-canvas"></canvas>
+                <div class="stage-label" id="stage-label">Click to seed beam</div>
+                <div class="canvas-hint" id="cursor-hint">— · —</div>
+                <div class="progress-bar"><div id="prog-bar"></div></div>
+            </div>
+
+            <div class="mini-grid">
+                <div class="mini-card">
+                    <div class="title"><span>Stage 1 — coarse knife-edge curves</span><span class="val" id="coarse-val">— · —</span></div>
+                    <canvas id="coarse-canvas"></canvas>
+                </div>
+                <div class="mini-card">
+                    <div class="title"><span>Stage 3 — beam size from I(R)</span><span class="val" id="size-val">w = —</span></div>
+                    <canvas id="size-canvas"></canvas>
+                </div>
+                <div class="mini-card square">
+                    <div class="title"><span>Stage 2 — fine 2D scan + sub-pixel fit</span><span class="val" id="fine-val">— · —</span></div>
+                    <canvas id="fine-canvas"></canvas>
+                </div>
+                <div class="mini-card square">
+                    <div class="title"><span>CCD plane · +1-order centred</span><span class="val" id="det-val">0.000</span></div>
+                    <canvas id="det-canvas"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ============ Report ============ -->
+    <div class="panel">
+        <h2 class="panel-title"><span>Calibration report</span></h2>
+        <div class="report">
+            <div class="item"><div class="lbl">True centre</div>     <div class="val" id="r-true">—</div></div>
+            <div class="item"><div class="lbl">Coarse centroid</div> <div class="val" id="r-coarse">—</div></div>
+            <div class="item"><div class="lbl">Sub-pixel centre</div><div class="val" id="r-fine">—</div></div>
+            <div class="item"><div class="lbl">Coarse error</div>    <div class="val warn" id="r-coarse-err">—</div></div>
+            <div class="item"><div class="lbl">Final error</div>     <div class="val ok"   id="r-fine-err">—</div></div>
+            <div class="item"><div class="lbl">True w₀ / measured w₀</div><div class="val" id="r-w0">—</div></div>
+            <div class="item"><div class="lbl">Beam-size error</div> <div class="val ok"   id="r-w0-err">—</div></div>
+            <div class="item"><div class="lbl">FWHM (x · y)</div>    <div class="val" id="r-fwhm">—</div></div>
+        </div>
+
+        <details>
+            <summary>How the three stages work</summary>
+            <p><b>Stage 1 — Coarse knife-edge.</b> A half-plane phase grating <code>x &gt; sx</code> sweeps across the SLM. The +1-order CCD intensity ∝ ∫|E|²·M dA — the integral of the beam under the masked region. Differentiating that transition curve yields the 1D projection of |E|², and its <em>first moment</em> is the centroid. Robust for any beam shape; unbiased; noise averages out.</p>
+            <p><b>Stage 2 — Fine sub-pixel scan.</b> A small disk grating of radius <code>R_spot</code> is parked at offsets around the coarse centre. Its +1-order intensity is the beam profile <em>convolved with the disk</em>, peaking at the true centre. We fit the resulting 2D map (parabolic + weighted-centroid fallback) to recover the centre to ≪ 1 px.</p>
+            <p><b>Stage 3 — 1/e² beam size.</b> Now centred on the fine estimate, sweep the radius <code>R</code> of a concentric disk grating. The +1-order intensity follows
+                <code>I(R) = A · ( 1 − exp(−2 R² / w²) )</code>.
+                Linear regression of <code>ln(1 − I/A) vs R²</code> seeds a non-linear fit that returns the 1/e² intensity radius w.</p>
+        </details>
+
+        <details>
+            <summary>Physics shortcut used in this simulator</summary>
+            <p>For a binary 0/π Ronchi grating gated by a 0/1 mask M(x,y), the +1 diffraction-order intensity equals <code>|c<sub>+1</sub>|²·∫|E<sub>in</sub>|²·M dA</code>. We use that closed form instead of an FFT per scan step — algorithmically identical up to a constant. The full 1920×1080 FFT version is in <code>src/Calibration_Simulation.py</code> for diagnostic plots.</p>
+        </details>
+    </div>
+
+</div>
+
+<script>
+"use strict";
+
+// ============ Constants & state ============
+const M = 1920, N = 1080;
+const PERIOD = 4;
+
+const $ = id => document.getElementById(id);
+const beamCanvas = $('beam-canvas'),  beamCtx = beamCanvas.getContext('2d');
+const overCanvas = $('overlay-canvas'), overCtx = overCanvas.getContext('2d');
+beamCanvas.width = M; beamCanvas.height = N;
+overCanvas.width = M; overCanvas.height = N;
+
+const detCanvas = $('det-canvas');
+const coarseCanvas = $('coarse-canvas');
+const fineCanvas = $('fine-canvas');
+const sizeCanvas = $('size-canvas');
+
+let trueCenter = { x: 1100, y: 540 };
+let trueW0 = 375;
+let coarseStep = 50, fineStep = 2, rSpot = 50, dR = 20, rmaxOverride = 0;
+
+let intensity = null;
+let colSum = null, rowSum = null;
+let totalPow = 0, peakIntensity = 0;
+
+let running = false, abortFlag = false;
+
+// ============ Beam computation (separable) ============
+function rebuildBeam() {
+    const W2 = trueW0 * trueW0;
+    const ex = new Float32Array(M), ey = new Float32Array(N);
+    for (let x = 0; x < M; x++) ex[x] = Math.exp(-2 * (x - trueCenter.x) ** 2 / W2);
+    for (let y = 0; y < N; y++) ey[y] = Math.exp(-2 * (y - trueCenter.y) ** 2 / W2);
+
+    intensity = new Float32Array(N * M);
+    colSum = new Float64Array(M);
+    rowSum = new Float64Array(N);
+    let pmax = 0, total = 0;
+    for (let y = 0; y < N; y++) {
+        const eyv = ey[y]; const off = y * M;
+        let rs = 0;
+        for (let x = 0; x < M; x++) {
+            const I = ex[x] * eyv;
+            intensity[off + x] = I;
+            colSum[x] += I; rs += I;
+            if (I > pmax) pmax = I;
+            total += I;
+        }
+        rowSum[y] = rs;
+    }
+    peakIntensity = pmax; totalPow = total;
+    drawBeam();
+}
+
+function drawBeam() {
+    const img = beamCtx.createImageData(M, N);
+    const inv = 1 / Math.max(peakIntensity, 1e-12);
+    const data = img.data;
+    for (let i = 0, j = 0; i < intensity.length; i++, j += 4) {
+        const v = Math.sqrt(intensity[i] * inv);
+        const g = Math.min(255, Math.round(v * 255));
+        data[j]     = g;
+        data[j + 1] = Math.min(255, g + 18);
+        data[j + 2] = Math.min(255, Math.round(g * 0.9 + 32));
+        data[j + 3] = 255;
+    }
+    beamCtx.putImageData(img, 0, 0);
+}
+
+// ============ Mask overlays ============
+let stripePattern = null;
+function ensureStripePattern() {
+    if (stripePattern) return stripePattern;
+    const c = document.createElement('canvas');
+    c.width = 4; c.height = PERIOD;
+    const cx = c.getContext('2d');
+    cx.fillStyle = 'rgba(56, 189, 248, 0.55)'; cx.fillRect(0, 0, 4, PERIOD / 2);
+    cx.fillStyle = 'rgba(56, 189, 248, 0.18)'; cx.fillRect(0, PERIOD / 2, 4, PERIOD / 2);
+    stripePattern = overCtx.createPattern(c, 'repeat');
+    return stripePattern;
+}
+
+function clearOverlay() { overCtx.clearRect(0, 0, M, N); }
+
+function drawHalfplaneMask(axis, threshold) {
+    overCtx.fillStyle = ensureStripePattern();
+    if (axis === 'x') overCtx.fillRect(threshold, 0, M - threshold, N);
+    else              overCtx.fillRect(0, threshold, M, N - threshold);
+}
+
+function drawDiskMask(cx, cy, r) {
+    overCtx.save();
+    overCtx.beginPath(); overCtx.arc(cx, cy, r, 0, Math.PI * 2); overCtx.clip();
+    overCtx.fillStyle = ensureStripePattern();
+    overCtx.fillRect(cx - r - 2, cy - r - 2, 2 * r + 4, 2 * r + 4);
+    overCtx.restore();
+    overCtx.strokeStyle = 'rgba(56, 189, 248, 0.85)'; overCtx.lineWidth = 2.5;
+    overCtx.beginPath(); overCtx.arc(cx, cy, r, 0, Math.PI * 2); overCtx.stroke();
+}
+
+function drawMarkers({ coarse = null, fine = null, w0 = null } = {}) {
+    overCtx.save();
+    overCtx.lineWidth = 3;
+    const r = 18;
+
+    // true centre — red plus
+    overCtx.strokeStyle = 'rgba(239, 68, 68, 0.95)';
+    overCtx.beginPath();
+    overCtx.moveTo(trueCenter.x - r, trueCenter.y); overCtx.lineTo(trueCenter.x + r, trueCenter.y);
+    overCtx.moveTo(trueCenter.x, trueCenter.y - r); overCtx.lineTo(trueCenter.x, trueCenter.y + r);
+    overCtx.stroke();
+    overCtx.fillStyle = 'rgba(239, 68, 68, 0.95)';
+    overCtx.font = 'bold 18px ui-monospace';
+    overCtx.fillText('TRUE', trueCenter.x + r + 4, trueCenter.y + 6);
+
+    if (coarse) {
+        overCtx.strokeStyle = 'rgba(251, 191, 36, 0.95)';
+        overCtx.beginPath();
+        overCtx.moveTo(coarse.x - r, coarse.y - r); overCtx.lineTo(coarse.x + r, coarse.y + r);
+        overCtx.moveTo(coarse.x + r, coarse.y - r); overCtx.lineTo(coarse.x - r, coarse.y + r);
+        overCtx.stroke();
+        overCtx.fillStyle = 'rgba(251, 191, 36, 0.95)';
+        overCtx.fillText('COARSE', coarse.x + r + 4, coarse.y - r - 4);
+    }
+    if (fine) {
+        overCtx.strokeStyle = 'rgba(16, 185, 129, 1.0)';
+        overCtx.fillStyle = 'rgba(16, 185, 129, 0.18)';
+        overCtx.lineWidth = 3;
+        overCtx.beginPath(); overCtx.arc(fine.x, fine.y, 16, 0, Math.PI * 2); overCtx.fill(); overCtx.stroke();
+        overCtx.fillStyle = 'rgba(16, 185, 129, 1.0)';
+        overCtx.fillText('FINAL', fine.x + 22, fine.y + 6);
+    }
+    if (w0 && fine) {
+        overCtx.strokeStyle = 'rgba(236, 72, 153, 0.9)';
+        overCtx.setLineDash([8, 6]); overCtx.lineWidth = 2.5;
+        overCtx.beginPath(); overCtx.arc(fine.x, fine.y, w0, 0, Math.PI * 2); overCtx.stroke();
+        overCtx.setLineDash([]);
+        overCtx.fillStyle = 'rgba(236, 72, 153, 0.9)';
+        overCtx.fillText(`1/e² · w=${w0.toFixed(0)}px`, fine.x + w0 + 6, fine.y);
+    }
+    overCtx.restore();
+}
+
+// ============ Closed-form integrals ============
+function knifeIntegralX(sx) {
+    sx = Math.max(0, Math.min(M, Math.ceil(sx)));
+    let s = 0; for (let i = sx; i < M; i++) s += colSum[i]; return s;
+}
+function knifeIntegralY(sy) {
+    sy = Math.max(0, Math.min(N, Math.ceil(sy)));
+    let s = 0; for (let i = sy; i < N; i++) s += rowSum[i]; return s;
+}
+function diskIntegral(cx, cy, r) {
+    const r2 = r * r;
+    const x0 = Math.max(0, Math.ceil(cx - r));
+    const x1 = Math.min(M - 1, Math.floor(cx + r));
+    const y0 = Math.max(0, Math.ceil(cy - r));
+    const y1 = Math.min(N - 1, Math.floor(cy + r));
+    let s = 0;
+    for (let y = y0; y <= y1; y++) {
+        const dy2 = (y - cy) ** 2; const off = y * M;
+        for (let x = x0; x <= x1; x++) {
+            if ((x - cx) ** 2 + dy2 <= r2) s += intensity[off + x];
+        }
+    }
+    return s;
+}
+
+// Pre-compute radial cumulative I(R) for fast Stage-3 sweep
+function buildRadialCum(cx, cy, rMax) {
+    const cum = new Float64Array(rMax + 1);
+    // bin by floor(r) in pixel units
+    const hist = new Float64Array(rMax + 1);
+    for (let y = 0; y < N; y++) {
+        const dy = y - cy, dy2 = dy * dy;
+        const off = y * M;
+        for (let x = 0; x < M; x++) {
+            const dx = x - cx;
+            const r = Math.sqrt(dx * dx + dy2);
+            const ri = r | 0;
+            if (ri <= rMax) hist[ri] += intensity[off + x];
+        }
+    }
+    let s = 0;
+    for (let i = 0; i <= rMax; i++) { s += hist[i]; cum[i] = s; }
+    return cum;
+}
+
+// ============ Stage helpers ============
+function centroidFromKnifeEdge(steps, vals) {
+    const proj = new Float64Array(steps.length - 1);
+    let psum = 0;
+    for (let i = 0; i < proj.length; i++) {
+        const v = -(vals[i + 1] - vals[i]);
+        proj[i] = v > 0 ? v : 0; psum += proj[i];
+    }
+    if (psum <= 0) {
+        for (let i = 0; i < proj.length; i++) {
+            const v = vals[i + 1] - vals[i];
+            proj[i] = v > 0 ? v : 0; psum += proj[i];
+        }
+    }
+    if (psum <= 0)
+        return { centroid: 0.5 * (steps[0] + steps[steps.length - 1]), fwhm: steps[1] - steps[0] };
+    let c = 0;
+    for (let i = 0; i < proj.length; i++) c += proj[i] * 0.5 * (steps[i] + steps[i + 1]);
+    c /= psum;
+    let pmax = 0; for (const p of proj) if (p > pmax) pmax = p;
+    const half = pmax * 0.5;
+    const bc = i => 0.5 * (steps[i] + steps[i + 1]);
+    // linear interpolation between adjacent bins where proj crosses half-max
+    let lo = NaN, hi = NaN;
+    for (let i = 0; i < proj.length - 1; i++) {
+        if (proj[i] < half && proj[i + 1] >= half) {
+            const t = (half - proj[i]) / (proj[i + 1] - proj[i]);
+            lo = bc(i) + t * (bc(i + 1) - bc(i));
+            break;
+        }
+    }
+    for (let i = proj.length - 1; i > 0; i--) {
+        if (proj[i] < half && proj[i - 1] >= half) {
+            const t = (half - proj[i]) / (proj[i - 1] - proj[i]);
+            hi = bc(i) + t * (bc(i - 1) - bc(i));
+            break;
+        }
+    }
+    const fwhm = (isFinite(lo) && isFinite(hi) && hi > lo) ? (hi - lo) : (steps[1] - steps[0]);
+    return { centroid: c, fwhm };
+}
+
+function subpixelFit(map, offsets) {
+    const n = offsets.length;
+    let amax = -Infinity, bI = 0, bJ = 0;
+    for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+        const v = map[i * n + j]; if (v > amax) { amax = v; bI = i; bJ = j; }
+    }
+    let dx, dy;
+    const step = offsets[1] - offsets[0];
+    if (bJ > 0 && bJ < n - 1) {
+        const a = map[bI * n + bJ - 1], b = map[bI * n + bJ], c = map[bI * n + bJ + 1];
+        const denom = a - 2 * b + c;
+        dx = offsets[bJ] + (denom !== 0 ? 0.5 * (a - c) / denom * step : 0);
+    } else dx = offsets[bJ];
+    if (bI > 0 && bI < n - 1) {
+        const a = map[(bI - 1) * n + bJ], b = map[bI * n + bJ], c = map[(bI + 1) * n + bJ];
+        const denom = a - 2 * b + c;
+        dy = offsets[bI] + (denom !== 0 ? 0.5 * (a - c) / denom * step : 0);
+    } else dy = offsets[bI];
+
+    if (bI === 0 || bI === n - 1 || bJ === 0 || bJ === n - 1) {
+        let zmin = +Infinity; for (let k = 0; k < map.length; k++) if (map[k] < zmin) zmin = map[k];
+        let ws = 0, xs = 0, ys = 0;
+        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
+            const w = map[i * n + j] - zmin;
+            ws += w; xs += w * offsets[j]; ys += w * offsets[i];
+        }
+        if (ws > 0) { dx = xs / ws; dy = ys / ws; }
+    }
+    return { dx, dy };
+}
+
+// Linear regression seed + Newton refinement for w in I(R)=A(1-exp(-2R²/w²))
+function fitBeamSize(radii, I) {
+    if (!I.length) return NaN;
+    const A = I[I.length - 1];
+    if (A <= 0) return NaN;
+    // linear seeding from middle range
+    const xs = [], ys = [];
+    for (let i = 0; i < I.length; i++) {
+        const norm = I[i] / A;
+        if (norm > 0.05 && norm < 0.95) {
+            xs.push(radii[i] * radii[i]);
+            ys.push(Math.log(Math.max(1e-12, 1 - norm)));
+        }
+    }
+    if (xs.length < 2) return NaN;
+    let sx = 0, sy = 0, sxx = 0, sxy = 0;
+    for (let i = 0; i < xs.length; i++) {
+        sx += xs[i]; sy += ys[i]; sxx += xs[i] * xs[i]; sxy += xs[i] * ys[i];
+    }
+    const slope = (xs.length * sxy - sx * sy) / (xs.length * sxx - sx * sx);
+    if (slope >= 0) return NaN;
+    let w = Math.sqrt(-2 / slope);
+
+    // 8 Gauss-Newton refinements on w (A held = I[last]/(1 - exp(-2R²_last/w²)))
+    for (let it = 0; it < 8; it++) {
+        const Rl = radii[radii.length - 1];
+        const Aest = I[I.length - 1] / Math.max(1e-12, 1 - Math.exp(-2 * Rl * Rl / (w * w)));
+        let g = 0, h = 0;
+        for (let i = 0; i < I.length; i++) {
+            const R = radii[i], k = 2 * R * R / (w * w);
+            const m = Aest * (1 - Math.exp(-k));
+            const r = m - I[i];
+            const dm = -Aest * Math.exp(-k) * (2 * k / w);     // dm/dw
+            g += r * dm; h += dm * dm;
+        }
+        if (h > 0) w = Math.max(1, w - g / h);
+    }
+    return w;
+}
+
+// ============ Plotters ============
+function clearCanvas(c, bg = '#050a16') {
+    const w = c.width = Math.max(1, Math.round(c.clientWidth * devicePixelRatio));
+    const h = c.height = Math.max(1, Math.round(c.clientHeight * devicePixelRatio));
+    const ctx = c.getContext('2d');
+    ctx.fillStyle = bg; ctx.fillRect(0, 0, w, h);
+    return { ctx, w, h };
+}
+
+function drawCoarsePlot(stateX, stateY, refs) {
+    const { ctx, w, h } = clearCanvas(coarseCanvas);
+    const padL = 38 * devicePixelRatio, padR = 14 * devicePixelRatio;
+    const padT = 14 * devicePixelRatio, padB = 22 * devicePixelRatio;
+    const pw = w - padL - padR, ph = h - padT - padB;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+    ctx.strokeRect(padL, padT, pw, ph);
+
+    ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
+    ctx.fillStyle = 'rgba(148,163,184,0.8)';
+    ctx.fillText('knife position (px)', padL + 6 * devicePixelRatio, h - 6 * devicePixelRatio);
+
+    function plotSeries(state, color, refValue) {
+        const { steps, vals, kind } = state;
+        if (vals.length < 2) return;
+        const xMax = Math.max(M, N);
+        let vmax = 0; for (const v of vals) if (v > vmax) vmax = v;
+        if (vmax === 0) vmax = 1;
+        ctx.strokeStyle = color; ctx.lineWidth = 1.7 * devicePixelRatio;
+        ctx.beginPath();
+        for (let i = 0; i < vals.length; i++) {
+            const px = padL + (steps[i] / xMax) * pw;
+            const py = padT + ph - (vals[i] / vmax) * ph;
+            if (i === 0) ctx.moveTo(px, py); else ctx.lineTo(px, py);
+        }
+        ctx.stroke();
+        if (refValue != null && isFinite(refValue)) {
+            const rx = padL + (refValue / xMax) * pw;
+            ctx.strokeStyle = color; ctx.setLineDash([4 * devicePixelRatio, 4 * devicePixelRatio]);
+            ctx.beginPath(); ctx.moveTo(rx, padT); ctx.lineTo(rx, padT + ph); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = color;
+            ctx.fillText(`${kind}=${refValue.toFixed(1)}`, rx + 3, padT + 11 * devicePixelRatio);
+        }
+    }
+
+    plotSeries(stateX, '#38bdf8', refs?.x);
+    plotSeries(stateY, '#f97316', refs?.y);
+
+    ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
+    ctx.fillStyle = '#38bdf8'; ctx.fillText('● X', padL + 6 * devicePixelRatio, padT + 12 * devicePixelRatio);
+    ctx.fillStyle = '#f97316'; ctx.fillText('● Y', padL + 30 * devicePixelRatio, padT + 12 * devicePixelRatio);
+}
+
+function drawHeatmap(map, offsets, finalDelta) {
+    const { ctx, w, h } = clearCanvas(fineCanvas);
+    const pad = 24 * devicePixelRatio;
+    const side = Math.min(w, h) - 2 * pad;
+    const x0 = (w - side) / 2, y0 = (h - side) / 2;
+    const n = offsets.length;
+    let vmin = +Infinity, vmax = -Infinity;
+    for (const v of map) { if (v < vmin) vmin = v; if (v > vmax) vmax = v; }
+    const range = (vmax - vmin) || 1;
+    const cell = side / n;
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+            const v = (map[i * n + j] - vmin) / range;
+            ctx.fillStyle = viridis(v);
+            ctx.fillRect(x0 + j * cell, y0 + i * cell, cell + 0.5, cell + 0.5);
+        }
+    }
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)'; ctx.lineWidth = 1;
+    ctx.strokeRect(x0, y0, side, side);
+    ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
+    ctx.fillStyle = 'rgba(148,163,184,0.85)';
+    ctx.fillText(`Δx ${offsets[0]}…${offsets[n - 1]}`, x0, h - 6 * devicePixelRatio);
+    if (finalDelta) {
+        const span = offsets[n - 1] - offsets[0];
+        const px = x0 + ((finalDelta.dx - offsets[0]) / span) * side;
+        const py = y0 + ((finalDelta.dy - offsets[0]) / span) * side;
+        ctx.strokeStyle = '#fff'; ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(px - 9, py); ctx.lineTo(px + 9, py);
+        ctx.moveTo(px, py - 9); ctx.lineTo(px, py + 9);
+        ctx.stroke();
+        ctx.fillStyle = '#10b981';
+        ctx.beginPath(); ctx.arc(px, py, 4, 0, Math.PI * 2); ctx.fill();
+    }
+}
+
+function drawSizePlot(radii, intensities, total, fittedW, trueW) {
+    const { ctx, w, h } = clearCanvas(sizeCanvas);
+    const padL = 38 * devicePixelRatio, padR = 14 * devicePixelRatio;
+    const padT = 14 * devicePixelRatio, padB = 24 * devicePixelRatio;
+    const pw = w - padL - padR, ph = h - padT - padB;
+
+    ctx.strokeStyle = 'rgba(255,255,255,0.12)'; ctx.lineWidth = 1;
+    ctx.strokeRect(padL, padT, pw, ph);
+
+    ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
+    ctx.fillStyle = 'rgba(148,163,184,0.8)';
+    ctx.fillText('mask radius R (px)', padL + 6 * devicePixelRatio, h - 6 * devicePixelRatio);
+
+    if (radii.length === 0 || total <= 0) return;
+    const xMax = Math.max(radii[radii.length - 1], (fittedW || 0) * 1.6, (trueW || 0) * 1.6);
+    const yMax = 1.05;
+
+    // 1/e² horizontal reference
+    const yRef = 1 - Math.exp(-2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.18)'; ctx.setLineDash([4, 4]);
+    ctx.beginPath();
+    const yPx = padT + ph - (yRef / yMax) * ph;
+    ctx.moveTo(padL, yPx); ctx.lineTo(padL + pw, yPx); ctx.stroke();
+    ctx.setLineDash([]);
+    ctx.fillStyle = 'rgba(255,255,255,0.45)';
+    ctx.fillText('1−e⁻² ≈ 0.865', padL + 4, yPx - 4);
+
+    // fitted curve
+    if (fittedW && isFinite(fittedW) && fittedW > 0) {
+        ctx.strokeStyle = 'rgba(236, 72, 153, 0.7)'; ctx.lineWidth = 1.5 * devicePixelRatio;
+        ctx.beginPath();
+        for (let k = 0; k <= 200; k++) {
+            const R = (k / 200) * xMax;
+            const y = 1 - Math.exp(-2 * R * R / (fittedW * fittedW));
+            const xp = padL + (R / xMax) * pw;
+            const yp = padT + ph - (y / yMax) * ph;
+            if (k === 0) ctx.moveTo(xp, yp); else ctx.lineTo(xp, yp);
+        }
+        ctx.stroke();
+        // mark w on x axis
+        const wp = padL + (fittedW / xMax) * pw;
+        ctx.strokeStyle = 'rgba(236, 72, 153, 0.9)'; ctx.setLineDash([5, 4]);
+        ctx.beginPath(); ctx.moveTo(wp, padT); ctx.lineTo(wp, padT + ph); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(236, 72, 153, 0.95)';
+        ctx.fillText(`w=${fittedW.toFixed(1)}`, wp + 3, padT + 11 * devicePixelRatio);
+    }
+    if (trueW && isFinite(trueW) && trueW > 0) {
+        const wp = padL + (trueW / xMax) * pw;
+        ctx.strokeStyle = 'rgba(239, 68, 68, 0.7)'; ctx.setLineDash([2, 5]);
+        ctx.beginPath(); ctx.moveTo(wp, padT); ctx.lineTo(wp, padT + ph); ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.fillStyle = 'rgba(239, 68, 68, 0.85)';
+        ctx.fillText(`true ${trueW.toFixed(0)}`, wp + 3, padT + 26 * devicePixelRatio);
+    }
+
+    // data points
+    ctx.fillStyle = '#10b981';
+    for (let i = 0; i < radii.length; i++) {
+        const R = radii[i];
+        const y = intensities[i] / total;
+        const xp = padL + (R / xMax) * pw;
+        const yp = padT + ph - (y / yMax) * ph;
+        ctx.beginPath(); ctx.arc(xp, yp, 2.4 * devicePixelRatio, 0, Math.PI * 2); ctx.fill();
+    }
+}
+
+function viridis(t) {
+    t = Math.max(0, Math.min(1, t));
+    const stops = [
+        [0.000, 68, 1, 84], [0.250, 58, 82, 139], [0.500, 32, 144, 140],
+        [0.750, 94, 201, 97], [1.000, 253, 231, 36],
+    ];
+    for (let i = 1; i < stops.length; i++) {
+        if (t <= stops[i][0]) {
+            const a = stops[i - 1], b = stops[i], f = (t - a[0]) / (b[0] - a[0]);
+            return `rgb(${a[1] + f * (b[1] - a[1]) | 0},${a[2] + f * (b[2] - a[2]) | 0},${a[3] + f * (b[3] - a[3]) | 0})`;
+        }
+    }
+    return 'rgb(253,231,36)';
+}
+
+function drawDetector(I, ref) {
+    const { ctx, w, h } = clearCanvas(detCanvas, '#02050d');
+
+    // dim background glow
+    const grad = ctx.createRadialGradient(w * 0.5, h * 0.5, 0, w * 0.5, h * 0.5, Math.max(w, h) * 0.7);
+    grad.addColorStop(0, 'rgba(56,189,248,0.06)');
+    grad.addColorStop(1, 'rgba(2,5,13,1)');
+    ctx.fillStyle = grad; ctx.fillRect(0, 0, w, h);
+
+    // diffraction axis (vertical, since grating period is along y)
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(w / 2, 0); ctx.lineTo(w / 2, h);
+    ctx.stroke();
+
+    ctx.font = `${10 * devicePixelRatio}px ui-monospace`;
+    ctx.fillStyle = 'rgba(148,163,184,0.55)';
+    ctx.fillText('CCD plane · centred on +1', 8 * devicePixelRatio, 14 * devicePixelRatio);
+
+    const t = Math.max(0, Math.min(1, I / Math.max(1e-12, ref)));
+    const r0 = Math.min(w, h) * 0.07;
+    const cx = w * 0.5;
+
+    // +2 order — above +1, much fainter (~1/9 of +1 amplitude for non-perfect Ronchi)
+    const c2y = h * 0.20;
+    drawSpot(ctx, cx, c2y, r0 * 0.55, 0.05 + 0.22 * t, '#a78bfa');
+    ctx.fillStyle = 'rgba(167,139,250,0.85)';
+    ctx.fillText('+2', cx + r0 * 0.7 + 4, c2y + 4 * devicePixelRatio);
+
+    // +1 order — at the geometric centre of the square (this is what the algorithm samples)
+    const c1y = h * 0.50;
+    drawSpot(ctx, cx, c1y, r0 * (0.7 + 0.6 * t), 0.18 + 0.82 * t, '#38bdf8');
+    ctx.fillStyle = 'rgba(56,189,248,1)';
+    ctx.fillText('+1', cx + r0 * 1.2 + 4, c1y + 4 * devicePixelRatio);
+
+    // 0 order — below +1, bright steady reference (un-diffracted)
+    const c0y = h * 0.80;
+    drawSpot(ctx, cx, c0y, r0 * 0.95, 0.7, '#f8fafc');
+    ctx.fillStyle = 'rgba(248,250,252,0.9)';
+    ctx.fillText('0', cx + r0 + 4, c0y + 4 * devicePixelRatio);
+
+    // intensity bar (bottom)
+    ctx.fillStyle = 'rgba(255,255,255,0.05)';
+    const bx = 8 * devicePixelRatio, by = h - 14 * devicePixelRatio,
+          bw = w - 16 * devicePixelRatio, bh = 6 * devicePixelRatio;
+    ctx.fillRect(bx, by, bw, bh);
+    const fg = ctx.createLinearGradient(bx, 0, bx + bw, 0);
+    fg.addColorStop(0, '#38bdf8'); fg.addColorStop(1, '#8b5cf6');
+    ctx.fillStyle = fg; ctx.fillRect(bx, by, bw * t, bh);
+}
+
+function drawSpot(ctx, cx, cy, r, alpha, color) {
+    ctx.save(); ctx.globalAlpha = alpha;
+    const g = ctx.createRadialGradient(cx, cy, 0, cx, cy, r * 2.2);
+    g.addColorStop(0, color); g.addColorStop(0.4, color); g.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = g;
+    ctx.beginPath(); ctx.arc(cx, cy, r * 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+}
+
+// ============ UI helpers ============
+function setStatus(text, klass) {
+    $('status-text').textContent = text;
+    const pill = $('status-pill');
+    pill.classList.remove('busy', 'ok'); if (klass) pill.classList.add(klass);
+}
+function setStage(text) { $('stage-label').textContent = text; }
+function setProgress(t) { $('prog-bar').style.width = `${Math.round(Math.max(0, Math.min(1, t)) * 100)}%`; }
+function setDetector(I, ref) {
+    $('det-val').textContent = (I / Math.max(1e-12, ref)).toFixed(4);
+    drawDetector(I, ref);
+}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const getDelay = () => Math.max(0, Math.round(80 * (1 - +$('speed').value / 100)));
+
+// ============ Main run ============
+async function runCalibration() {
+    if (running) return;
+    running = true; abortFlag = false;
+    $('run-btn').disabled = true; $('reset-btn').textContent = 'Stop';
+    setStatus('running', 'busy');
+    rebuildBeam();
+    clearOverlay(); drawMarkers();
+
+    const refMax = totalPow;
+    setDetector(0, refMax);
+
+    // ---- Stage 1A: coarse X ----
+    setStage('Stage 1A · coarse X knife-edge');
+    const xSteps = []; for (let s = 0; s < M; s += coarseStep) xSteps.push(s);
+    const xVals = [];
+    for (let k = 0; k < xSteps.length; k++) {
+        if (abortFlag) return cleanup();
+        const sx = xSteps[k];
+        const I = knifeIntegralX(sx);
+        xVals.push(I);
+        clearOverlay(); drawHalfplaneMask('x', sx); drawMarkers();
+        setDetector(I, refMax);
+        setProgress(k / (xSteps.length * 2 + 50));
+        drawCoarsePlot(
+            { steps: xSteps.slice(0, k + 1), vals: xVals, kind: 'x' },
+            { steps: [], vals: [], kind: 'y' });
+        await sleep(getDelay());
+    }
+    const cx_res = centroidFromKnifeEdge(xSteps, xVals);
+
+    // ---- Stage 1B: coarse Y ----
+    setStage('Stage 1B · coarse Y knife-edge');
+    const ySteps = []; for (let s = 0; s < N; s += coarseStep) ySteps.push(s);
+    const yVals = [];
+    for (let k = 0; k < ySteps.length; k++) {
+        if (abortFlag) return cleanup();
+        const sy = ySteps[k];
+        const I = knifeIntegralY(sy);
+        yVals.push(I);
+        clearOverlay(); drawHalfplaneMask('y', sy); drawMarkers();
+        setDetector(I, refMax);
+        setProgress((xSteps.length + k) / (xSteps.length + ySteps.length + 50));
+        drawCoarsePlot(
+            { steps: xSteps, vals: xVals, kind: 'x' },
+            { steps: ySteps.slice(0, k + 1), vals: yVals, kind: 'y' },
+            { x: cx_res.centroid });
+        await sleep(getDelay());
+    }
+    const cy_res = centroidFromKnifeEdge(ySteps, yVals);
+    drawCoarsePlot(
+        { steps: xSteps, vals: xVals, kind: 'x' },
+        { steps: ySteps, vals: yVals, kind: 'y' },
+        { x: cx_res.centroid, y: cy_res.centroid });
+    const coarse = { x: cx_res.centroid, y: cy_res.centroid };
+    $('coarse-val').textContent = `(${coarse.x.toFixed(1)}, ${coarse.y.toFixed(1)})`;
+
+    setStage(`Stage 1 done · coarse (${coarse.x.toFixed(1)}, ${coarse.y.toFixed(1)})`);
+    clearOverlay(); drawMarkers({ coarse });
+    await sleep(Math.max(160, getDelay() * 4));
+
+    // ---- Stage 2: fine 2D scan ----
+    const halfWindow = Math.min(40, Math.max(15, Math.round(0.08 * Math.max(cx_res.fwhm, cy_res.fwhm))));
+    const offsets = [];
+    for (let v = -halfWindow; v <= halfWindow; v += fineStep) offsets.push(v);
+    const n = offsets.length;
+    const fineMap = new Float64Array(n * n);
+    let stepCount = 0; const total = n * n;
+
+    for (let i = 0; i < n; i++) {
+        for (let j = 0; j < n; j++) {
+            if (abortFlag) return cleanup();
+            const tx = coarse.x + offsets[j];
+            const ty = coarse.y + offsets[i];
+            const I = diskIntegral(tx, ty, rSpot);
+            fineMap[i * n + j] = I;
+            clearOverlay(); drawDiskMask(tx, ty, rSpot); drawMarkers({ coarse });
+            setDetector(I, refMax);
+            stepCount++;
+            setProgress(0.5 + 0.4 * stepCount / total);
+            setStage(`Stage 2 · fine spot ${stepCount}/${total} at (${tx.toFixed(0)}, ${ty.toFixed(0)})`);
+            drawHeatmap(fineMap, offsets);
+            if (getDelay() > 0 || stepCount % 12 === 0) await sleep(getDelay());
+        }
+    }
+    const sp = subpixelFit(fineMap, offsets);
+    const fine = { x: coarse.x + sp.dx, y: coarse.y + sp.dy };
+    drawHeatmap(fineMap, offsets, { dx: sp.dx, dy: sp.dy });
+    $('fine-val').textContent = `(${fine.x.toFixed(2)}, ${fine.y.toFixed(2)})`;
+
+    setStage(`Stage 2 done · final centre (${fine.x.toFixed(2)}, ${fine.y.toFixed(2)})`);
+    clearOverlay(); drawMarkers({ coarse, fine });
+    await sleep(Math.max(160, getDelay() * 4));
+
+    // ---- Stage 3: beam-size scan ----
+    setStage('Stage 3 · expanding circular grating');
+    const maxFromEdges = Math.min(fine.x, M - fine.x, fine.y, N - fine.y);
+    const userMax = +$('rmax').value;
+    let rMax = (userMax > 0) ? Math.min(userMax, Math.floor(maxFromEdges - 5))
+                              : Math.floor(Math.min(maxFromEdges - 5, 1.4 * Math.max(cx_res.fwhm, cy_res.fwhm)));
+    rMax = Math.max(rMax, 30);
+    const radii = [], iVals = [];
+    // pre-compute radial cumulative (fast & accurate)
+    const cum = buildRadialCum(fine.x, fine.y, rMax);
+
+    let lastI = 0;
+    for (let R = dR; R <= rMax; R += dR) {
+        if (abortFlag) return cleanup();
+        const I = cum[R];
+        radii.push(R); iVals.push(I);
+        clearOverlay(); drawDiskMask(fine.x, fine.y, R); drawMarkers({ coarse, fine });
+        setDetector(I, refMax);
+        const wEst = (radii.length >= 4) ? fitBeamSize(radii, iVals) : NaN;
+        drawSizePlot(radii, iVals, cum[rMax], wEst, null);
+        setProgress(0.9 + 0.1 * (R / rMax));
+        setStage(`Stage 3 · R=${R} px · I/I∞=${(I / cum[rMax]).toFixed(3)}`);
+        lastI = I;
+        await sleep(Math.max(getDelay(), 18));
+    }
+    const wFit = fitBeamSize(radii, iVals);
+    drawSizePlot(radii, iVals, cum[rMax], wFit, trueW0);
+    $('size-val').textContent = isFinite(wFit) ? `w = ${wFit.toFixed(2)} px` : 'w = NaN';
+
+    clearOverlay(); drawMarkers({ coarse, fine, w0: wFit });
+    setStage(`Done · centre (${fine.x.toFixed(2)}, ${fine.y.toFixed(2)}) · w = ${wFit.toFixed(2)} px`);
+    setProgress(1);
+
+    // ---- Report ----
+    const errC = Math.hypot(coarse.x - trueCenter.x, coarse.y - trueCenter.y);
+    const errF = Math.hypot(fine.x - trueCenter.x, fine.y - trueCenter.y);
+    $('r-true').textContent   = `(${trueCenter.x.toFixed(2)}, ${trueCenter.y.toFixed(2)})`;
+    $('r-coarse').textContent = `(${coarse.x.toFixed(2)}, ${coarse.y.toFixed(2)})`;
+    $('r-fine').textContent   = `(${fine.x.toFixed(2)}, ${fine.y.toFixed(2)})`;
+    $('r-coarse-err').textContent = `${errC.toFixed(2)} px`;
+    $('r-fine-err').textContent   = `${errF.toFixed(4)} px`;
+    $('r-w0').textContent         = `${trueW0.toFixed(1)} / ${isFinite(wFit) ? wFit.toFixed(2) : '—'} px`;
+    $('r-w0-err').textContent     = isFinite(wFit) ? `${Math.abs(wFit - trueW0).toFixed(3)} px (${(Math.abs(wFit - trueW0) / trueW0 * 100).toFixed(2)} %)` : '—';
+    $('r-fwhm').textContent   = `${cx_res.fwhm.toFixed(1)} · ${cy_res.fwhm.toFixed(1)}`;
+
+    setStatus('done', 'ok');
+    cleanup();
+}
+
+function cleanup() {
+    running = false;
+    $('run-btn').disabled = false;
+    $('reset-btn').textContent = 'Reset';
+}
+
+function reset() {
+    if (running) { abortFlag = true; setStatus('aborted'); cleanup(); return; }
+    clearOverlay(); drawMarkers();
+    setStage('Click to seed beam'); setStatus('idle');
+    setProgress(0);
+    $('det-val').textContent = '0.000';
+    $('coarse-val').textContent = '— · —';
+    $('fine-val').textContent = '— · —';
+    $('size-val').textContent = 'w = —';
+    drawDetector(0, 1);
+    clearCanvas(coarseCanvas); clearCanvas(fineCanvas); clearCanvas(sizeCanvas);
+    for (const id of ['r-true','r-coarse','r-fine','r-coarse-err','r-fine-err','r-w0','r-w0-err','r-fwhm']) {
+        $(id).textContent = '—';
+    }
+}
+
+// ============ Wiring ============
+function bindRange(id, lblId, fmt = v => v) {
+    const el = $(id), lbl = $(lblId);
+    if (lbl) lbl.textContent = fmt(el.value);
+    el.addEventListener('input', () => { if (lbl) lbl.textContent = fmt(el.value); });
+}
+bindRange('w0', 'w0-lbl');
+bindRange('coarse-step', 'cs-lbl');
+bindRange('fine-step', 'fs-lbl');
+bindRange('r-spot', 'rs-lbl');
+bindRange('dr', 'dr-lbl');
+bindRange('rmax', 'rmax-lbl', v => +v === 0 ? 'auto' : v);
+bindRange('speed', 'sp-lbl', v => v < 25 ? 'slow' : v < 65 ? 'medium' : v < 90 ? 'fast' : 'turbo');
+
+['cx', 'cy'].forEach(id => $(id).addEventListener('change', () => {
+    trueCenter.x = clamp(+$('cx').value, 0, M - 1);
+    trueCenter.y = clamp(+$('cy').value, 0, N - 1);
+    rebuildBeam(); reset();
+}));
+$('w0').addEventListener('change', () => { trueW0 = +$('w0').value; rebuildBeam(); reset(); });
+$('coarse-step').addEventListener('change', () => coarseStep = +$('coarse-step').value);
+$('fine-step').addEventListener('change',   () => fineStep = +$('fine-step').value);
+$('r-spot').addEventListener('change',      () => rSpot = +$('r-spot').value);
+$('dr').addEventListener('change',          () => dR = +$('dr').value);
+$('rmax').addEventListener('change',        () => rmaxOverride = +$('rmax').value);
+$('random-btn').addEventListener('click', () => {
+    const margin = trueW0 + 30;
+    trueCenter.x = margin + Math.random() * (M - 2 * margin);
+    trueCenter.y = margin + Math.random() * (N - 2 * margin);
+    $('cx').value = trueCenter.x.toFixed(1);
+    $('cy').value = trueCenter.y.toFixed(1);
+    rebuildBeam(); reset();
+});
+
+function clamp(v, lo, hi) { return Math.max(lo, Math.min(hi, v)); }
+
+const slmWrap = $('slm-wrap');
+function evtCoords(e) {
+    const r = slmWrap.getBoundingClientRect();
+    return {
+        x: clamp((e.clientX - r.left) / r.width  * M, 0, M - 1),
+        y: clamp((e.clientY - r.top)  / r.height * N, 0, N - 1),
+    };
+}
+slmWrap.addEventListener('mousemove', e => {
+    const c = evtCoords(e);
+    $('cursor-hint').textContent = `${c.x.toFixed(0)}, ${c.y.toFixed(0)}`;
+});
+slmWrap.addEventListener('click', e => {
+    if (running) return;
+    const c = evtCoords(e);
+    trueCenter.x = c.x; trueCenter.y = c.y;
+    $('cx').value = c.x.toFixed(1); $('cy').value = c.y.toFixed(1);
+    if (e.shiftKey) {
+        const next = clamp(trueW0 + 15, 120, 500);
+        trueW0 = next; $('w0').value = next; $('w0-lbl').textContent = next;
+    }
+    rebuildBeam(); reset();
+});
+
+$('run-btn').addEventListener('click', runCalibration);
+$('reset-btn').addEventListener('click', reset);
+
+window.addEventListener('resize', () => {
+    if (!running) {
+        drawDetector(0, 1);
+        clearCanvas(coarseCanvas); clearCanvas(fineCanvas); clearCanvas(sizeCanvas);
+    }
+});
+
+// initial render
+rebuildBeam();
+reset();
+drawMarkers();
+</script>
+</body>
+</html>
